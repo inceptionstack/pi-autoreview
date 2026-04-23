@@ -1,8 +1,10 @@
 /**
  * git-roots.ts — Detect git repo roots from modified file paths
+ * Expands ~ to homedir for correct path resolution.
  */
 
 import { dirname, resolve, isAbsolute } from "node:path";
+import { homedir } from "node:os";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
 /**
@@ -39,7 +41,9 @@ export async function resolveGitRoots(
   for (const file of modifiedFiles) {
     if (file === "(bash file op)") continue;
 
-    const absPath = isAbsolute(file) ? file : resolve(cwd, file);
+    // Expand ~ to homedir
+    const expanded = file.startsWith("~/") ? resolve(homedir(), file.slice(2)) : file;
+    const absPath = isAbsolute(expanded) ? expanded : resolve(cwd, expanded);
     const dir = dirname(absPath);
 
     // Check cache first

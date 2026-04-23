@@ -8,6 +8,7 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { truncateDiff } from "./helpers";
 import { filterIgnored } from "./ignore";
+import { log } from "./logger";
 import {
   type TrackedToolCall,
   buildChangeSummary,
@@ -21,6 +22,7 @@ export interface ReviewContext {
   changedFiles: string[];
   fileContents: Map<string, string>;
   fileTree: string;
+  commitLog: string;
 }
 
 const MAX_FILE_SIZE = 10_000;
@@ -120,7 +122,11 @@ export async function buildReviewContext(
   );
   const fileTree = treeResult.code === 0 ? treeResult.stdout.trim() : "(file tree unavailable)";
 
-  return { diff, changedFiles, fileContents, fileTree };
+  onStatus?.("getting commit history…");
+  const commitLogResult = await pi.exec("git", ["log", "--oneline", "-10"], { timeout: 5000 });
+  const commitLog = commitLogResult.code === 0 ? commitLogResult.stdout.trim() : "";
+
+  return { diff, changedFiles, fileContents, fileTree, commitLog };
 }
 
 /**
@@ -140,6 +146,11 @@ export function formatReviewContext(ctx: ReviewContext): string {
   }
 
   parts.push(`## Git diff\n\`\`\`diff\n${truncateDiff(ctx.diff, 30000)}\n\`\`\`\n`);
+
+  if (ctx.commitLog) {
+    parts.push(`## Recent commits\n\`\`\`\n${ctx.commitLog}\n\`\`\`\n`);
+  }
+
   parts.push(`## Project file tree (depth 3)\n\`\`\`\n${ctx.fileTree.slice(0, 5000)}\n\`\`\`\n`);
 
   return parts.join("\n");
@@ -162,6 +173,7 @@ export async function getBestReviewContent(
   ignorePatterns?: string[],
   gitRoots?: Set<string>,
 ): Promise<ReviewContent | null> {
+  log("getBestReviewContent: gitRoots=", gitRoots ? [...gitRoots] : "none", "toolCalls=", agentToolCalls.length);
   // 1. Try each known git root
   if (gitRoots && gitRoots.size > 0) {
     const allContexts: string[] = [];
@@ -170,49 +182,115 @@ export async function getBestReviewContent(
     for (const root of gitRoots) {
       onStatus?.(`checking ${root}…`);
 
-      // Try uncommitted changes
+      // Try uncommitted changes, then fall back to last commit
+      let diff = "";
+      let files: string[] = [];
+      let commitLabel = "";
+
       const result = await pi.exec("git", ["-C", root, "diff", "HEAD"], { timeout: 15000 });
       if (result.code === 0 && result.stdout.trim()) {
-        const diff = truncateDiff(result.stdout.trim(), 15000);
+        diff = result.stdout.trim();
         const nameResult = await pi.exec("git", ["-C", root, "diff", "HEAD", "--name-only"], {
           timeout: 5000,
         });
-        const files =
+        files =
           nameResult.code === 0 ? nameResult.stdout.trim().split("\n").filter(Boolean) : [];
-        const filteredFiles = ignorePatterns ? filterIgnored(files, ignorePatterns) : files;
-        allFiles.push(...filteredFiles.map((f) => `${root}/${f}`));
-        allContexts.push(
-          `## Repo: ${root}\n\nChanged files: ${filteredFiles.join(", ")}\n\n\`\`\`diff\n${diff}\n\`\`\``,
-        );
-        continue;
+      } else {
+        // Try last commit
+        const lastResult = await pi.exec("git", ["-C", root, "diff", "HEAD~1", "HEAD"], {
+          timeout: 15000,
+        });
+        if (lastResult.code === 0 && lastResult.stdout.trim()) {
+          diff = lastResult.stdout.trim();
+          const logResult = await pi.exec("git", ["-C", root, "log", "--oneline", "-1"], {
+            timeout: 5000,
+          });
+          commitLabel = ` (last commit: ${logResult.stdout.trim()})`;
+          const nameResult = await pi.exec(
+            "git",
+            ["-C", root, "diff", "HEAD~1", "HEAD", "--name-only"],
+            { timeout: 5000 },
+          );
+          files =
+            nameResult.code === 0 ? nameResult.stdout.trim().split("\n").filter(Boolean) : [];
+        }
       }
 
-      // Try last commit
-      const lastResult = await pi.exec("git", ["-C", root, "diff", "HEAD~1", "HEAD"], {
-        timeout: 15000,
-      });
-      if (lastResult.code === 0 && lastResult.stdout.trim()) {
-        const diff = truncateDiff(lastResult.stdout.trim(), 15000);
-        const logResult = await pi.exec("git", ["-C", root, "log", "--oneline", "-1"], {
-          timeout: 5000,
-        });
-        const nameResult = await pi.exec(
-          "git",
-          ["-C", root, "diff", "HEAD~1", "HEAD", "--name-only"],
+      if (!diff) continue;
+
+      const filteredFiles = ignorePatterns ? filterIgnored(files, ignorePatterns) : files;
+      if (filteredFiles.length === 0) continue;
+
+      allFiles.push(...filteredFiles.map((f) => `${root}/${f}`));
+
+      // Read full contents of each changed file
+      const fileSections: string[] = [];
+      let totalContentSize = 0;
+      for (const file of filteredFiles) {
+        if (totalContentSize >= MAX_TOTAL_CONTENT_SIZE) {
+          fileSections.push(`### ${file}\n(skipped — total content size limit reached)`);
+          continue;
+        }
+        onStatus?.(`reading ${root}/${file}…`);
+        const readResult = await pi.exec(
+          "head", ["-c", String(MAX_FILE_SIZE + 100), `${root}/${file}`],
           { timeout: 5000 },
         );
-        const files =
-          nameResult.code === 0 ? nameResult.stdout.trim().split("\n").filter(Boolean) : [];
-        allFiles.push(...files.map((f) => `${root}/${f}`));
-        allContexts.push(
-          `## Repo: ${root} (last commit: ${logResult.stdout.trim()})\n\n\`\`\`diff\n${diff}\n\`\`\``,
-        );
+        if (readResult.code !== 0 || !readResult.stdout) {
+          fileSections.push(`### ${file}\n(could not read — file may be deleted)`);
+          continue;
+        }
+        let content = readResult.stdout;
+        totalContentSize += content.length;
+        if (content.length > MAX_FILE_SIZE) {
+          content = content.slice(0, MAX_FILE_SIZE) +
+            `\n\n... (truncated, ${content.length} total chars)`;
+        }
+        fileSections.push(`### ${file}\n\`\`\`\n${content}\n\`\`\``);
       }
+
+      // Re-run diff scoped to filtered files only (use correct range)
+      let scopedDiff = diff;
+      if (ignorePatterns && filteredFiles.length < files.length) {
+        const scopedArgs = commitLabel
+          ? ["diff", "HEAD~1", "HEAD", "--", ...filteredFiles]   // last commit
+          : ["diff", "HEAD", "--", ...filteredFiles];            // uncommitted
+        const scopedResult = await pi.exec("git", ["-C", root, ...scopedArgs], { timeout: 15000 });
+        if (scopedResult.code === 0 && scopedResult.stdout.trim()) {
+          scopedDiff = scopedResult.stdout.trim();
+        }
+      }
+
+      log("path1: root=", root, "diff=", diff.length, "files=", filteredFiles, "fileSections=", fileSections.length);
+
+      // Get recent commit messages for context
+      const commitLogResult = await pi.exec(
+        "git", ["-C", root, "log", "--oneline", "-10"],
+        { timeout: 5000 },
+      );
+      const commitLog = commitLogResult.code === 0 ? commitLogResult.stdout.trim() : "";
+      const commitSection = commitLog
+        ? `## Recent commits\n\`\`\`\n${commitLog}\n\`\`\`\n\n`
+        : "";
+
+      allContexts.push(
+        `## Repo: ${root}${commitLabel}\n\n` +
+        `Changed files: ${filteredFiles.join(", ")}\n\n` +
+        commitSection +
+        `## Full file contents\n\n${fileSections.join("\n\n")}\n\n` +
+        `## Git diff\n\`\`\`diff\n${truncateDiff(scopedDiff, 30000)}\n\`\`\``,
+      )
     }
 
     if (allContexts.length > 0) {
+      // Append tool call summary so the reviewer sees exactly what edits were made
+      const changeSummary = buildChangeSummary(agentToolCalls);
+      const summarySection = changeSummary.trim()
+        ? `\n\n---\n\n## Agent tool calls (what was changed)\n\n${changeSummary}`
+        : "";
+      log("path1: returning", allContexts.length, "repo(s)", "files=", allFiles);
       return {
-        content: allContexts.join("\n\n---\n\n"),
+        content: allContexts.join("\n\n---\n\n") + summarySection,
         label: `${allContexts.length} repo(s)`,
         files: allFiles,
       };
@@ -222,8 +300,13 @@ export async function getBestReviewContent(
   // 2. Fallback: try cwd as git repo
   const reviewContext = await buildReviewContext(pi, onStatus, ignorePatterns);
   if (reviewContext) {
+    log("path2: cwd git repo, files=", reviewContext.changedFiles);
+    const changeSummary = buildChangeSummary(agentToolCalls);
+    const summarySection = changeSummary.trim()
+      ? `\n\n## Agent tool calls (what was changed)\n\n${changeSummary}`
+      : "";
     return {
-      content: formatReviewContext(reviewContext),
+      content: formatReviewContext(reviewContext) + summarySection,
       label: "",
       files: reviewContext.changedFiles,
     };
@@ -236,15 +319,46 @@ export async function getBestReviewContent(
     if (lastCommitDiff.code === 0 && lastCommitDiff.stdout.trim()) {
       const truncated = truncateDiff(lastCommitDiff.stdout.trim(), 30000);
       const commitLog = (
-        await pi.exec("git", ["log", "--oneline", "-1"], { timeout: 5000 })
+        await pi.exec("git", ["log", "--oneline", "-10"], { timeout: 5000 })
       ).stdout.trim();
       const nameResult = await pi.exec("git", ["diff", "HEAD~1", "HEAD", "--name-only"], {
         timeout: 5000,
       });
       const files =
         nameResult.code === 0 ? nameResult.stdout.trim().split("\n").filter(Boolean) : [];
+
+      // Read full contents of changed files
+      const fileSections: string[] = [];
+      let totalContentSize = 0;
+      for (const file of files) {
+        if (totalContentSize >= MAX_TOTAL_CONTENT_SIZE) break;
+        onStatus?.(`reading ${file}…`);
+        const readResult = await pi.exec(
+          "head", ["-c", String(MAX_FILE_SIZE + 100), file],
+          { timeout: 5000 },
+        );
+        if (readResult.code !== 0 || !readResult.stdout) continue;
+        let content = readResult.stdout;
+        totalContentSize += content.length;
+        if (content.length > MAX_FILE_SIZE) {
+          content = content.slice(0, MAX_FILE_SIZE) +
+            `\n\n... (truncated, ${content.length} total chars)`;
+        }
+        fileSections.push(`### ${file}\n\`\`\`\n${content}\n\`\`\``);
+      }
+
+      const changeSummary = buildChangeSummary(agentToolCalls);
+      const summarySection = changeSummary.trim()
+        ? `\n\n## Agent tool calls (what was changed)\n\n${changeSummary}`
+        : "";
+      const fileSection = fileSections.length > 0
+        ? `\n\n## Full file contents\n\n${fileSections.join("\n\n")}`
+        : "";
+
+      log("path3: last commit, files=", files);
+
       return {
-        content: `## Last commit\n${commitLog}\n\n## Diff\n\`\`\`diff\n${truncated}\n\`\`\``,
+        content: `## Recent commits\n\`\`\`\n${commitLog}\n\`\`\`${fileSection}\n\n## Diff\n\`\`\`diff\n${truncated}\n\`\`\`${summarySection}`,
         label: "last commit",
         files,
       };

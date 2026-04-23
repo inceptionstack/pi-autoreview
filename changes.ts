@@ -140,7 +140,7 @@ export function buildChangeSummary(toolCalls: TrackedToolCall[]): string {
         const editSummary = edits
           .map(
             (e: any, i: number) =>
-              `  Edit ${i + 1}: replaced "${(e.oldText ?? "").slice(0, 200)}" with "${(e.newText ?? "").slice(0, 200)}"`,
+              `  Edit ${i + 1}:\n    OLD: ${(e.oldText ?? "").slice(0, 500)}\n    NEW: ${(e.newText ?? "").slice(0, 500)}`,
           )
           .join("\n");
         return `EDITED file: ${tc.input?.path}\n${editSummary}`;

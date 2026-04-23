@@ -28,11 +28,12 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
 import { clampCommitCount, shouldDiffAllCommits, truncateDiff } from "./helpers";
 import { runReviewSession, sendReviewResult } from "./reviewer";
-import { type TrackedToolCall, hasFileChanges, isFileModifyingTool } from "./changes";
+import { type TrackedToolCall, hasFileChanges, isFileModifyingTool, collectModifiedPaths } from "./changes";
 import { getBestReviewContent } from "./context";
-import { loadIgnorePatterns } from "./ignore";
+import { loadIgnorePatterns, filterIgnored } from "./ignore";
 import { loadRoundupRules, runRoundupReview } from "./roundup";
 import { findGitRoot, resolveGitRoots } from "./git-roots";
+import { log, logRotate } from "./logger";
 
 const MAX_TRACKED_FILES = 1000;
 
@@ -43,13 +44,13 @@ const MIN_REVIEW_CONTENT_LENGTH = 50;
 
 const DEFAULT_REVIEW_PROMPT = `You are a senior code reviewer. You will be given:
 - A list of changed files
-- Full contents of each changed file
+- Full contents of each changed file (post-change)
 - The git diff of the changes
-- The project file tree
+- Optionally, the project file tree
 
 You have tools to explore the codebase:
 - read(path, offset?, limit?) — read a file's contents
-- bash(command) — run shell commands (git diff, cat, find, grep, npm test, etc.)
+- bash(command) — run shell commands (git log, cat, find, grep, etc.)
 - grep(pattern, path) — search for a pattern
 - find(path, pattern) — find files
 - ls(path) — list directory contents
@@ -57,47 +58,62 @@ You have tools to explore the codebase:
 You do NOT have write or edit tools. You are reviewing only, not modifying code.
 Do NOT output XML tags like <read_file> or <bash> — use the tools above via function calls.
 
-Focus your review on the code provided below. Use tools if you need additional context — for example to run tests, check git history, read related files, or verify test coverage.
+## IMPORTANT: Verify before flagging
 
-Review the changes for the following:
+You MUST use your tools to verify any concern before reporting it as an issue.
+- If you think a function is missing error handling → read the file and confirm.
+- If you think tests are missing → ls/find the test directory and check.
+- If you think a pattern is used inconsistently → read the other call sites.
+- If you suspect an injection risk → read the actual code to see how args are passed.
+- NEVER report issues based on assumptions about code you haven't read.
+- NEVER invent or hallucinate code that might exist — read it first.
 
-## Correctness
+## Workflow
+
+1. **Explore**: Read all changed files fully. Check the test directory. Understand the codebase.
+2. **Analyze**: Compare the diff against the full file contents. Understand the intent.
+3. **Report**: Only then write your review.
+
+## What to review
+
+### Correctness (most important)
 - Bugs, logic errors, off-by-one errors
-- Missing error handling
+- Missing error handling that would cause runtime crashes
 - Race conditions or concurrency issues
 
-## Security
+### Security
 - Injection vulnerabilities, secret leaks, auth bypasses
 - Unsafe input handling
 
-## Design & principles
-- DRY (Don't Repeat Yourself) — flag duplicated logic
-- Single Responsibility Principle — each function/class should do one thing
-- Readability and maintainability — unclear naming, overly complex logic
+### Design (only flag clear violations)
+- Duplicated logic that will cause bugs if one copy is updated but not the other
+- Only flag design issues that create concrete risk, not stylistic preferences
 
-## Testing
-- Are there tests for the new functionality added? Check the test directory.
-- Test quality: follow Roy Osherove's "Art of Unit Testing" (3rd edition) conventions:
-  - Naming: UnitOfWork_StateUnderTest_ExpectedBehavior (or similar descriptive pattern)
-  - Each test should have clear entry points (triggers) and exit points (return values, state changes, or collaborator calls)
-  - Tests should be isolated, readable, and trustworthy
-  - Flag missing tests for new code paths
+## What NOT to review
+- Do NOT flag missing tests unless the change is complex algorithmic logic
+- Do NOT flag style issues (naming, file length, pattern preferences)
+- Do NOT suggest refactors that aren't related to the current change
+- Do NOT report issues you cannot verify with your tools
 
 ## Response format
 Be concise. If everything looks fine, say "LGTM — no issues found."
 If there are issues, list them as bullet points with severity (high/medium/low).
-Do NOT suggest stylistic preferences. Only flag real problems.`;
+Only report issues you are confident about after verification.`;
 
 // ── Config types ─────────────────────────────────────
 
 interface AutoReviewSettings {
   maxReviewLoops: number;
   model: string; // "provider/model-id" e.g. "amazon-bedrock/us.anthropic.claude-opus-4-6-v1"
+  thinkingLevel: string; // "off" | "minimal" | "low" | "medium" | "high" | "xhigh"
+  roundupEnabled: boolean;
 }
 
 const DEFAULT_SETTINGS: AutoReviewSettings = {
   maxReviewLoops: 100,
   model: "amazon-bedrock/us.anthropic.claude-opus-4-6-v1",
+  thinkingLevel: "off",
+  roundupEnabled: false,
 };
 
 // ── Config loading ───────────────────────────────────
@@ -156,6 +172,27 @@ async function loadSettings(
       } else {
         errors.push(
           `[auto-review] "model" must be "provider/model-id" (got ${JSON.stringify(parsed.model)}). Using default: ${DEFAULT_SETTINGS.model}.`,
+        );
+      }
+    }
+
+    if ("thinkingLevel" in parsed) {
+      const valid = ["off", "minimal", "low", "medium", "high", "xhigh"];
+      if (typeof parsed.thinkingLevel === "string" && valid.includes(parsed.thinkingLevel)) {
+        settings.thinkingLevel = parsed.thinkingLevel;
+      } else {
+        errors.push(
+          `[auto-review] "thinkingLevel" must be one of ${valid.join(", ")} (got ${JSON.stringify(parsed.thinkingLevel)}). Using default: ${DEFAULT_SETTINGS.thinkingLevel}.`,
+        );
+      }
+    }
+
+    if ("roundupEnabled" in parsed) {
+      if (typeof parsed.roundupEnabled === "boolean") {
+        settings.roundupEnabled = parsed.roundupEnabled;
+      } else {
+        errors.push(
+          `[auto-review] "roundupEnabled" must be a boolean (got ${JSON.stringify(parsed.roundupEnabled)}). Using default: ${DEFAULT_SETTINGS.roundupEnabled}.`,
         );
       }
     }
@@ -258,15 +295,21 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
-    if (modifiedFiles.size > 0) {
-      const count = modifiedFiles.size;
-      const verb = reviewEnabled ? theme.fg("muted", "will review") : theme.fg("muted", "pending");
-      const issueIndicator = lastReviewHadIssues ? ` ${theme.fg("error", "issues found")}` : "";
-      ctx.ui.setStatus(
-        "code-review",
-        `${label} ${state}${issueIndicator} · ${verb} ${theme.fg("accent", String(count))} ${theme.fg("muted", count === 1 ? "file" : "files")} ${theme.fg("dim", "(Alt+R toggle)")}`,
-      );
-      return;
+    if (modifiedFiles.size > 0 || agentToolCalls.length > 0) {
+      // Include paths extracted from tool call args (e.g. edit path, bash file refs)
+      const toolPaths = collectModifiedPaths(agentToolCalls);
+      const allPaths = new Set([...modifiedFiles, ...toolPaths]);
+      allPaths.delete("(bash file op)");
+      const count = allPaths.size;
+      if (count > 0) {
+        const verb = reviewEnabled ? theme.fg("muted", "will review") : theme.fg("muted", "pending");
+        const issueIndicator = lastReviewHadIssues ? ` ${theme.fg("error", "issues found")}` : "";
+        ctx.ui.setStatus(
+          "code-review",
+          `${label} ${state}${issueIndicator} · ${verb} ${theme.fg("accent", String(count))} ${theme.fg("muted", count === 1 ? "file" : "files")} ${theme.fg("dim", "(Alt+R toggle)")}`,
+        );
+        return;
+      }
     }
 
     const issueIndicator = lastReviewHadIssues ? ` ${theme.fg("error", "issues found")}` : "";
@@ -313,12 +356,21 @@ export default function (pi: ExtensionAPI) {
             reviewAbort = new AbortController();
             updateStatus(ctx);
             try {
-              // Resolve git roots from tracked files + detected bash git commands
+              // Resolve git roots from tracked files, tool call paths, and detected bash git commands
               const allRoots = new Set(detectedGitRoots);
-              const fileRoots = await resolveGitRoots(pi, ctx.cwd, modifiedFiles);
+              const toolCallPaths = new Set(collectModifiedPaths(agentToolCalls));
+              const combinedFiles = new Set([...modifiedFiles, ...toolCallPaths]);
+              const fileRoots = await resolveGitRoots(pi, ctx.cwd, combinedFiles);
               for (const root of fileRoots.keys()) {
                 if (root !== "(no-git)") allRoots.add(root);
               }
+
+              logRotate("=== review start ===");
+              log("cwd:", ctx.cwd);
+              log("gitRoots:", [...allRoots]);
+              log("modifiedFiles:", [...modifiedFiles]);
+              log("agentToolCalls:", agentToolCalls.length);
+              log("ignorePatterns:", ignorePatterns?.length ?? "none");
 
               const best = await getBestReviewContent(
                 pi,
@@ -327,18 +379,25 @@ export default function (pi: ExtensionAPI) {
                 ignorePatterns ?? undefined,
                 allRoots,
               );
+
+              log("best:", best ? { label: best.label, files: best.files, contentLen: best.content.length } : "null");
+
               if (best) {
                 updateStatus(ctx, "analyzing…");
                 const prompt = `${buildReviewPrompt()}\n\n---\n\n${best.content}`;
+                log("prompt length:", prompt.length);
                 const result = await runReviewSession(prompt, {
                   signal: reviewAbort.signal,
                   cwd: ctx.cwd,
                   model: settings.model,
+                  thinkingLevel: settings.thinkingLevel,
                   onActivity: (desc) => updateStatus(ctx, desc),
                 });
+                log("result:", { isLgtm: result.isLgtm, durationMs: result.durationMs, textLen: result.text.length });
                 if (result.isLgtm) reviewLoopCount = 0;
                 sendReviewResult(pi, result, best.label, { reviewedFiles: best.files });
               } else {
+                log("no changes found");
                 ctx.ui.notify("No changes found to review.", "info");
               }
             } catch (err: any) {
@@ -466,12 +525,20 @@ export default function (pi: ExtensionAPI) {
     updateStatus(ctx);
 
     try {
-      // Resolve git roots from tracked files + detected bash git commands
+      // Resolve git roots from tracked files, tool call paths, and detected bash git commands
       const allRoots = new Set(detectedGitRoots);
-      const fileRoots = await resolveGitRoots(pi, ctx.cwd, modifiedFiles);
+      const toolCallPaths = new Set(collectModifiedPaths(agentToolCalls));
+      const combinedFiles = new Set([...modifiedFiles, ...toolCallPaths]);
+      const fileRoots = await resolveGitRoots(pi, ctx.cwd, combinedFiles);
       for (const root of fileRoots.keys()) {
         if (root !== "(no-git)") allRoots.add(root);
       }
+
+      logRotate("=== review start (auto) ===");
+      log("cwd:", ctx.cwd);
+      log("gitRoots:", [...allRoots]);
+      log("modifiedFiles:", [...modifiedFiles]);
+      log("agentToolCalls:", agentToolCalls.length);
 
       const best = await getBestReviewContent(
         pi,
@@ -483,9 +550,12 @@ export default function (pi: ExtensionAPI) {
 
       if (!best || best.content.trim().length < MIN_REVIEW_CONTENT_LENGTH) {
         // No meaningful changes to review, or content too small
+        log("no meaningful changes, skipping");
         resetTrackingState(ctx);
         return;
       }
+
+      log("best:", { label: best.label, files: best.files, contentLen: best.content.length });
 
       // Skip if we've already reviewed this exact content
       const contentHash = createHash("sha256").update(best.content).digest("hex");
@@ -504,6 +574,7 @@ export default function (pi: ExtensionAPI) {
         signal: reviewAbort.signal,
         cwd: ctx.cwd,
         model: settings.model,
+        thinkingLevel: settings.thinkingLevel,
         onActivity: (desc) => updateStatus(ctx, desc),
       });
 
@@ -590,10 +661,10 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  pi.registerShortcut("ctrl+alt+meta+r", {
+  pi.registerShortcut("ctrl+alt+shift+r", {
     description: "Full reset: cancel review, reset loop count, clear tracked files",
     handler: async (ctx) => {
-      console.log("[auto-review] Full reset via Ctrl+Alt+Cmd+R");
+      console.log("[auto-review] Full reset via Ctrl+Alt+Shift+R");
       if (isReviewing && reviewAbort) {
         reviewAbort.abort();
       }
@@ -667,7 +738,29 @@ export default function (pi: ExtensionAPI) {
           diffArgs.push("diff", `HEAD~${effectiveCount}`, "HEAD");
         }
 
-        const diffResult = await pi.exec("git", diffArgs, { timeout: 15000 });
+        // Get changed file list and filter ignored patterns
+        const nameArgs = [...diffArgs, "--name-only"];
+        const nameResult = await pi.exec("git", nameArgs, { timeout: 5000 });
+        let changedFiles =
+          nameResult.code === 0 ? nameResult.stdout.trim().split("\n").filter(Boolean) : [];
+
+        if (ignorePatterns && ignorePatterns.length > 0) {
+          const before = changedFiles.length;
+          changedFiles = filterIgnored(changedFiles, ignorePatterns);
+          if (changedFiles.length < before) {
+            const skipped = before - changedFiles.length;
+            ctx.ui.notify(`Filtered ${skipped} ignored file(s)`, "info");
+          }
+        }
+
+        if (changedFiles.length === 0) {
+          ctx.ui.notify(`No reviewable changes in last ${effectiveCount} commit(s) (all ignored).`, "info");
+          return;
+        }
+
+        // Get diff scoped to non-ignored files only
+        const scopedDiffArgs = [...diffArgs, "--", ...changedFiles];
+        const diffResult = await pi.exec("git", scopedDiffArgs, { timeout: 15000 });
         if (diffResult.code !== 0) {
           ctx.ui.notify(`git diff failed: ${diffResult.stderr.slice(0, 200)}`, "error");
           return;
@@ -690,6 +783,7 @@ export default function (pi: ExtensionAPI) {
           signal: reviewAbort!.signal,
           cwd: ctx.cwd,
           model: settings.model,
+          thinkingLevel: settings.thinkingLevel,
         });
 
         sendReviewResult(pi, result, commitLabel);
@@ -749,7 +843,7 @@ export default function (pi: ExtensionAPI) {
       if (settings.maxReviewLoops !== DEFAULT_SETTINGS.maxReviewLoops) {
         console.log(`[auto-review] maxReviewLoops = ${settings.maxReviewLoops}`);
       }
-      console.log(`[auto-review] reviewer model: ${settings.model}`);
+      console.log(`[auto-review] reviewer model: ${settings.model}, thinking: ${settings.thinkingLevel}`);
     }
 
     updateStatus(ctx);

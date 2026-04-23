@@ -75,7 +75,8 @@ describe("buildChangeSummary", () => {
       },
     ]);
     expect(result).toContain("EDITED file: foo.ts");
-    expect(result).toContain('replaced "old"');
+    expect(result).toContain("OLD: old");
+    expect(result).toContain("NEW: new");
   });
 
   it("buildChangeSummary_BashCall_IncludesCommandAndResult", () => {

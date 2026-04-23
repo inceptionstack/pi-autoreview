@@ -32,6 +32,8 @@ export interface ReviewOptions {
   cwd: string;
   /** "provider/model-id" to use for the reviewer */
   model?: string;
+  /** Thinking level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" */
+  thinkingLevel?: string;
   /** Called when the reviewer uses tools — for status bar updates */
   onActivity?: (description: string) => void;
 }
@@ -90,6 +92,12 @@ export async function runReviewSession(prompt: string, opts: ReviewOptions): Pro
       }
     }
   }
+
+  // Set thinking level (default: off for fast reviews)
+  type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+  const thinkingLevel = (opts.thinkingLevel ?? "off") as ThinkingLevel;
+  session.setThinkingLevel(thinkingLevel);
+  console.log(`[auto-review] Thinking level: ${thinkingLevel}`);
 
   let reviewText = "";
   const unsub = session.subscribe((ev: AgentSessionEvent) => {
