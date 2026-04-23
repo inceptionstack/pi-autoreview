@@ -214,6 +214,14 @@ export default function (pi: ExtensionAPI) {
   let lastActivity = "";
   let activityTimer: ReturnType<typeof setTimeout> | undefined;
 
+  function clearActivityTimer() {
+    if (activityTimer) {
+      clearTimeout(activityTimer);
+      activityTimer = undefined;
+    }
+    lastActivity = "";
+  }
+
   function updateStatus(ctx: { ui: any; hasUI?: boolean }, activity?: string) {
     if (!ctx.hasUI || !ctx.ui) return;
     const theme = ctx.ui.theme;
@@ -225,6 +233,8 @@ export default function (pi: ExtensionAPI) {
       if (activity) {
         lastActivity = activity;
         if (activityTimer) clearTimeout(activityTimer);
+        // Note: setTimeout captures ctx — safe because clearActivityTimer()
+        // is called in all review-end paths before ctx can change.
         activityTimer = setTimeout(() => {
           lastActivity = "";
           updateStatus(ctx);
@@ -232,7 +242,7 @@ export default function (pi: ExtensionAPI) {
       }
       const displayActivity = activity ?? lastActivity;
       const loopInfo = theme.fg("dim", `[${reviewLoopCount}/${settings.maxReviewLoops}]`);
-      const modelName = settings.model.split("/").pop() ?? "";
+      const modelName = (settings.model || "").split("/").pop() ?? "";
       const modelInfo = theme.fg("dim", modelName);
       const activityInfo = displayActivity ? ` ${theme.fg("muted", displayActivity)}` : "";
       ctx.ui.setStatus(
@@ -528,11 +538,7 @@ export default function (pi: ExtensionAPI) {
     } finally {
       isReviewing = false;
       reviewAbort = null;
-      if (activityTimer) {
-        clearTimeout(activityTimer);
-        activityTimer = undefined;
-      }
-      lastActivity = "";
+      clearActivityTimer();
       resetTrackingState(ctx);
     }
   });
