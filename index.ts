@@ -27,13 +27,8 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
 import { clampCommitCount, shouldDiffAllCommits, truncateDiff } from "./helpers";
 import { runReviewSession, sendReviewResult } from "./reviewer";
-import {
-  type TrackedToolCall,
-  hasFileChanges,
-  isFileModifyingTool,
-  buildChangeSummary,
-} from "./changes";
-import { buildReviewContext, formatReviewContext } from "./context";
+import { type TrackedToolCall, hasFileChanges, isFileModifyingTool } from "./changes";
+import { getBestReviewContent } from "./context";
 import { loadIgnorePatterns } from "./ignore";
 
 const MAX_TRACKED_FILES = 1000;
@@ -270,15 +265,15 @@ export default function (pi: ExtensionAPI) {
             reviewAbort = new AbortController();
             updateStatus(ctx);
             try {
-              const reviewContext = await buildReviewContext(
-                pi as any,
+              const best = await getBestReviewContent(
+                pi,
+                agentToolCalls,
                 (msg) => updateStatus(ctx, msg),
                 ignorePatterns ?? undefined,
               );
-              if (reviewContext) {
+              if (best) {
                 updateStatus(ctx, "analyzing…");
-                const contextSection = formatReviewContext(reviewContext);
-                const prompt = `${buildReviewPrompt()}\n\n---\n\n${contextSection}`;
+                const prompt = `${buildReviewPrompt()}\n\n---\n\n${best.content}`;
                 const result = await runReviewSession(prompt, {
                   signal: reviewAbort.signal,
                   cwd: ctx.cwd,
@@ -286,40 +281,9 @@ export default function (pi: ExtensionAPI) {
                   onActivity: (desc) => updateStatus(ctx, desc),
                 });
                 if (result.isLgtm) reviewLoopCount = 0;
-                sendReviewResult(pi, result, "", {
-                  showLoopCount: result.isLgtm
-                    ? undefined
-                    : `loop ${reviewLoopCount}/${settings.maxReviewLoops}`,
-                });
+                sendReviewResult(pi, result, best.label);
               } else {
-                // No uncommitted diff — try last commit instead
-                updateStatus(ctx, "checking last commit…");
-                const lastCommitDiff = await pi.exec("git", ["diff", "HEAD~1", "HEAD"], {
-                  timeout: 15000,
-                });
-                if (lastCommitDiff.code === 0 && lastCommitDiff.stdout.trim()) {
-                  const truncatedDiff = (await import("./helpers")).truncateDiff(
-                    lastCommitDiff.stdout.trim(),
-                    30000,
-                  );
-                  const commitLog = (
-                    await pi.exec("git", ["log", "--oneline", "-1"], {
-                      timeout: 5000,
-                    })
-                  ).stdout.trim();
-                  updateStatus(ctx, "analyzing last commit…");
-                  const prompt = `${buildReviewPrompt()}\n\n---\n\nReview the last commit:\n\nCommit: ${commitLog}\n\nDiff:\n\`\`\`diff\n${truncatedDiff}\n\`\`\``;
-                  const result = await runReviewSession(prompt, {
-                    signal: reviewAbort.signal,
-                    cwd: ctx.cwd,
-                    model: settings.model,
-                    onActivity: (desc) => updateStatus(ctx, desc),
-                  });
-                  if (result.isLgtm) reviewLoopCount = 0;
-                  sendReviewResult(pi, result, "last commit");
-                } else {
-                  ctx.ui.notify("No changes found to review.", "info");
-                }
+                ctx.ui.notify("No changes found to review.", "info");
               }
             } catch (err: any) {
               if (err?.message === "Review cancelled") {
@@ -419,28 +383,20 @@ export default function (pi: ExtensionAPI) {
     updateStatus(ctx);
 
     try {
-      // Build rich context: file tree, changed files, full contents, diff
-      const reviewContext = await buildReviewContext(
+      const best = await getBestReviewContent(
         pi,
+        agentToolCalls,
         (msg) => updateStatus(ctx, msg),
         ignorePatterns ?? undefined,
       );
 
-      let contextSection: string;
-      if (reviewContext) {
-        contextSection = formatReviewContext(reviewContext);
-      } else {
-        // No git diff available — fall back to tool call summaries
-        const fallback = buildChangeSummary(agentToolCalls);
-        if (!fallback.trim()) {
-          resetTrackingState(ctx);
-          return;
-        }
-        contextSection = fallback;
+      if (!best) {
+        resetTrackingState(ctx);
+        return;
       }
 
       updateStatus(ctx, "analyzing…");
-      const prompt = `${buildReviewPrompt()}\n\n---\n\n${contextSection}`;
+      const prompt = `${buildReviewPrompt()}\n\n---\n\n${best.content}`;
       const result = await runReviewSession(prompt, {
         signal: reviewAbort.signal,
         cwd: ctx.cwd,

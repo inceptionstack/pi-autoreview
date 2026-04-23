@@ -1,12 +1,14 @@
 /**
  * context.ts — Build rich review context
  *
- * Gathers: file tree, changed files list, full file contents, git diff
+ * Gathers: file tree, changed files list, full file contents, git diff.
+ * Falls back gracefully when git is unavailable.
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { truncateDiff } from "./helpers";
 import { filterIgnored } from "./ignore";
+import { type TrackedToolCall, buildChangeSummary } from "./changes";
 
 export interface ReviewContext {
   diff: string;
@@ -29,10 +31,7 @@ export async function buildReviewContext(
 ): Promise<ReviewContext | null> {
   onStatus?.("getting diff…");
 
-  // If we have ignore patterns, get filtered diff; otherwise get full diff
-  const diffArgs = ["diff", "HEAD"];
-  // We'll refine the diff after we know which files to include
-  const fullDiffResult = await pi.exec("git", diffArgs, { timeout: 15000 });
+  const fullDiffResult = await pi.exec("git", ["diff", "HEAD"], { timeout: 15000 });
   let diff = fullDiffResult.code === 0 ? fullDiffResult.stdout.trim() : "";
 
   if (!diff) return null;
@@ -150,4 +149,50 @@ export function formatReviewContext(ctx: ReviewContext): string {
   parts.push(`## Project file tree (depth 3)\n\`\`\`\n${ctx.fileTree.slice(0, 5000)}\n\`\`\`\n`);
 
   return parts.join("\n");
+}
+
+/**
+ * Get the best available review content.
+ * Tries: git diff HEAD → git diff HEAD~1 → tool call summaries.
+ * Returns the context string for the reviewer prompt, or null if nothing to review.
+ */
+export async function getBestReviewContent(
+  pi: ExtensionAPI,
+  agentToolCalls: TrackedToolCall[],
+  onStatus?: (msg: string) => void,
+  ignorePatterns?: string[],
+): Promise<{ content: string; label: string } | null> {
+  // 1. Try uncommitted changes (git diff HEAD)
+  const reviewContext = await buildReviewContext(pi, onStatus, ignorePatterns);
+  if (reviewContext) {
+    return { content: formatReviewContext(reviewContext), label: "" };
+  }
+
+  // 2. Try last commit (git diff HEAD~1 HEAD)
+  onStatus?.("checking last commit…");
+  try {
+    const lastCommitDiff = await pi.exec("git", ["diff", "HEAD~1", "HEAD"], { timeout: 15000 });
+    if (lastCommitDiff.code === 0 && lastCommitDiff.stdout.trim()) {
+      const truncated = truncateDiff(lastCommitDiff.stdout.trim(), 30000);
+      const commitLog = (
+        await pi.exec("git", ["log", "--oneline", "-1"], { timeout: 5000 })
+      ).stdout.trim();
+      return {
+        content: `## Last commit\n${commitLog}\n\n## Diff\n\`\`\`diff\n${truncated}\n\`\`\``,
+        label: "last commit",
+      };
+    }
+  } catch {
+    // git not available — fall through
+  }
+
+  // 3. Fall back to tool call summaries (no git)
+  if (agentToolCalls.length > 0) {
+    const summary = buildChangeSummary(agentToolCalls);
+    if (summary.trim()) {
+      return { content: summary, label: "tracked changes" };
+    }
+  }
+
+  return null;
 }
