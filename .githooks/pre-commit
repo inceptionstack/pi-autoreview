@@ -4,7 +4,7 @@
 # Scans only added lines in staged diffs.
 #
 
-PATTERNS=(
+PATTERNS_PERL=(
   # Telegram bot tokens
   'TELEGRAM_BOT_TOKEN=.*[0-9]+:AA'
   # Anthropic API keys
@@ -21,46 +21,72 @@ PATTERNS=(
   'NPM_TOKEN[=:].+'
 )
 
-# Known safe example strings (exact match only)
+# Fallback patterns for systems without grep -P (no lookahead)
+PATTERNS_ERE=(
+  'TELEGRAM_BOT_TOKEN=.*[0-9]+:AA'
+  'sk-ant-[a-zA-Z0-9]'
+  'sk-[a-zA-Z0-9-]{20,}'
+  '(AKIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|ASIA)[A-Z0-9]{16}'
+  'AWS_SECRET_ACCESS_KEY[=:].{20,}'
+  'ANTHROPIC_API_KEY[=:].+'
+  'OPENAI_API_KEY[=:].+'
+  'NPM_TOKEN[=:].+'
+)
+
+# Known safe strings — if found anywhere in a line, that line is allowed
 ALLOWED=(
   'AKIAIOSFODNN7EXAMPLE'
   'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'
 )
 
+# Detect grep -P support once
+HAS_GREP_P=0
+if echo "test" | grep -P "test" >/dev/null 2>&1; then
+  HAS_GREP_P=1
+fi
+
+if [ "$HAS_GREP_P" -eq 0 ]; then
+  echo "WARNING: grep -P not available. OpenAI key detection may have false positives (sk-ant- not excluded)." >&2
+fi
+
 FAILED=0
 
-# Extract only added content lines from staged diff
-# - Lines starting with + (excluding +++ headers)
-# - Skip comment lines and quoted pattern definitions (avoids self-match in hook files)
-ADDED_LINES=$(git diff --cached --diff-filter=ACM -U0 \
+# Extract added content lines from staged diff (including renames)
+ADDED_LINES=$(git diff --cached --diff-filter=ACMR -U0 \
   | grep '^+' \
   | grep -v '^+++' \
-  | grep -v "^+[[:space:]]*#" \
-  | grep -v "^+[[:space:]]*'" \
 )
 
 if [ -z "$ADDED_LINES" ]; then
   exit 0
 fi
 
+if [ "$HAS_GREP_P" -eq 1 ]; then
+  PATTERNS=("${PATTERNS_PERL[@]}")
+  GREP_MODE="-P"
+else
+  PATTERNS=("${PATTERNS_ERE[@]}")
+  GREP_MODE="-E"
+fi
+
 for pattern in "${PATTERNS[@]}"; do
-  # Use -P (perl regex) for lookahead support, fall back to -E
-  MATCHES=$(echo "$ADDED_LINES" | grep -P "$pattern" 2>/dev/null)
-  if [ -z "$MATCHES" ]; then
-    MATCHES=$(echo "$ADDED_LINES" | grep -E "$pattern" 2>/dev/null)
-  fi
+  MATCHES=$(echo "$ADDED_LINES" | grep $GREP_MODE "$pattern" 2>/dev/null)
 
   if [ -n "$MATCHES" ]; then
     while IFS= read -r line; do
-      # Strip leading + to get actual content
       content="${line:1}"
 
-      # Exact match against allowlist (not substring)
+      # Check if line contains any allowed string
       IS_ALLOWED=0
       for allowed in "${ALLOWED[@]}"; do
-        if [ "$content" = "$allowed" ]; then
-          IS_ALLOWED=1
-          break
+        if [[ "$content" == *"$allowed"* ]]; then
+          # Make sure the allowed string isn't a substring of a longer key
+          # by checking no alphanumeric char immediately follows it
+          after="${content#*"$allowed"}"
+          if [ -z "$after" ] || [[ ! "$after" =~ ^[A-Za-z0-9] ]]; then
+            IS_ALLOWED=1
+            break
+          fi
         fi
       done
 
