@@ -204,9 +204,270 @@ export interface ReviewContent {
   files: string[];
 }
 
+
+// ── Helper: format tool call summary section ────────
+
+function buildSummarySection(agentToolCalls: TrackedToolCall[]): { summarySection: string; changeSummary: string } {
+  const changeSummary = buildChangeSummary(agentToolCalls);
+  const summarySection = changeSummary.trim()
+    ? `\n\n---\n\n## Agent tool calls (what was changed)\n\n${changeSummary}`
+    : "";
+  return { summarySection, changeSummary };
+}
+
+// ── Path 1: git diff from known git roots ───────────
+
+/**
+ * Try to build review content from each known git root.
+ * For each root: get diff + untracked files, read full contents, include commit log.
+ */
+export async function getContentFromGitRoots(
+  pi: ExtensionAPI,
+  gitRoots: Set<string>,
+  ignorePatterns: string[] | undefined,
+  summarySection: string,
+  onStatus?: (msg: string) => void,
+): Promise<ReviewContent | null> {
+  const allContexts: string[] = [];
+  const allFiles: string[] = [];
+
+  for (const root of gitRoots) {
+    onStatus?.(`checking ${root}…`);
+    const repoContext = await buildRepoContext(pi, root, ignorePatterns, onStatus);
+    if (!repoContext) continue;
+
+    allFiles.push(...repoContext.files.map((f) => `${root}/${f}`));
+    allContexts.push(repoContext.text);
+  }
+
+  if (allContexts.length === 0) return null;
+
+  log("path1: returning", allContexts.length, "repo(s)", "files=", allFiles);
+  return {
+    content: allContexts.join("\n\n---\n\n") + summarySection,
+    label: `${allContexts.length} repo(s)`,
+    files: allFiles,
+  };
+}
+
+/**
+ * Build context text for a single git repo.
+ * Tries uncommitted changes first, falls back to last commit, then untracked-only.
+ */
+async function buildRepoContext(
+  pi: ExtensionAPI,
+  root: string,
+  ignorePatterns: string[] | undefined,
+  onStatus?: (msg: string) => void,
+): Promise<{ text: string; files: string[] } | null> {
+  let diff = "";
+  let files: string[] = [];
+  let commitLabel = "";
+  const untrackedFiles = new Set<string>();
+
+  // Try uncommitted changes
+  const result = await pi.exec("git", ["-C", root, "diff", "HEAD"], { timeout: 15000 });
+  if (result.code === 0 && result.stdout.trim()) {
+    diff = result.stdout.trim();
+    files = await listDiffFiles(pi, root, "HEAD");
+
+    // Also include untracked (new) files
+    const untracked = await listUntrackedFiles(pi, root);
+    const existing = new Set(files);
+    for (const f of untracked) {
+      if (!existing.has(f)) {
+        files.push(f);
+        untrackedFiles.add(f);
+      }
+    }
+  } else {
+    // Fall back to last commit
+    const lastResult = await pi.exec("git", ["-C", root, "diff", "HEAD~1", "HEAD"], { timeout: 15000 });
+    if (lastResult.code === 0 && lastResult.stdout.trim()) {
+      diff = lastResult.stdout.trim();
+      const logResult = await pi.exec("git", ["-C", root, "log", "--oneline", "-1"], { timeout: 5000 });
+      commitLabel = ` (last commit: ${logResult.stdout.trim()})`;
+      files = await listDiffFiles(pi, root, "HEAD~1", "HEAD");
+    }
+  }
+
+  // If still no diff, check for untracked files only
+  if (!diff) {
+    files = await listUntrackedFiles(pi, root);
+    for (const f of files) untrackedFiles.add(f);
+    if (files.length === 0) return null;
+  }
+
+  const filteredFiles = ignorePatterns ? filterIgnored(files, ignorePatterns) : files;
+  if (filteredFiles.length === 0) return null;
+
+  // Read full contents of each changed file
+  const { sections: fileSections } = await readChangedFiles(pi, filteredFiles, {
+    root,
+    newFiles: untrackedFiles,
+    onStatus,
+  });
+
+  // Re-run diff scoped to filtered files only (use correct range)
+  let scopedDiff = diff;
+  if (ignorePatterns && filteredFiles.length < files.length) {
+    const scopedArgs = commitLabel
+      ? ["diff", "HEAD~1", "HEAD", "--", ...filteredFiles]
+      : ["diff", "HEAD", "--", ...filteredFiles];
+    const scopedResult = await pi.exec("git", ["-C", root, ...scopedArgs], { timeout: 15000 });
+    if (scopedResult.code === 0 && scopedResult.stdout.trim()) {
+      scopedDiff = scopedResult.stdout.trim();
+    }
+  }
+
+  log("path1: root=", root, "diff=", diff.length, "files=", filteredFiles, "fileSections=", fileSections.length);
+
+  // Get recent commit messages for context
+  const commitLogResult = await pi.exec("git", ["-C", root, "log", "--oneline", "-10"], { timeout: 5000 });
+  const commitLog = commitLogResult.code === 0 ? commitLogResult.stdout.trim() : "";
+  const commitSection = commitLog
+    ? `## Recent commits\n\`\`\`\n${commitLog}\n\`\`\`\n\n`
+    : "";
+
+  const fileList = filteredFiles
+    .map((f) => (untrackedFiles.has(f) ? `${f} (new)` : f))
+    .join(", ");
+
+  const text =
+    `## Repo: ${root}${commitLabel}\n\n` +
+    `Changed files: ${fileList}\n\n` +
+    commitSection +
+    `## Full file contents\n\n${fileSections.join("\n\n")}\n\n` +
+    `## Git diff\n\`\`\`diff\n${truncateDiff(scopedDiff, 30000)}\n\`\`\``;
+
+  return { text, files: filteredFiles };
+}
+
+/** List files changed in a git diff range. */
+async function listDiffFiles(pi: ExtensionAPI, root: string, ...range: string[]): Promise<string[]> {
+  const result = await pi.exec("git", ["-C", root, "diff", ...range, "--name-only"], { timeout: 5000 });
+  return result.code === 0 ? result.stdout.trim().split("\n").filter(Boolean) : [];
+}
+
+/** List untracked files in a git repo. */
+async function listUntrackedFiles(pi: ExtensionAPI, root: string): Promise<string[]> {
+  const result = await pi.exec(
+    "git", ["-C", root, "ls-files", "--others", "--exclude-standard"],
+    { timeout: 5000 },
+  );
+  return result.code === 0 ? result.stdout.trim().split("\n").filter(Boolean) : [];
+}
+
+// ── Path 2: cwd as git repo (full buildReviewContext) ──
+
+export async function getContentFromCwd(
+  pi: ExtensionAPI,
+  ignorePatterns: string[] | undefined,
+  summarySection: string,
+  onStatus?: (msg: string) => void,
+): Promise<ReviewContent | null> {
+  const reviewContext = await buildReviewContext(pi, onStatus, ignorePatterns);
+  if (!reviewContext) return null;
+
+  log("path2: cwd git repo, files=", reviewContext.changedFiles);
+  return {
+    content: formatReviewContext(reviewContext) + summarySection,
+    label: "",
+    files: reviewContext.changedFiles,
+  };
+}
+
+// ── Path 3: last commit from cwd ─────────────────────
+
+export async function getContentFromLastCommit(
+  pi: ExtensionAPI,
+  summarySection: string,
+  onStatus?: (msg: string) => void,
+): Promise<ReviewContent | null> {
+  onStatus?.("checking last commit…");
+  try {
+    const lastCommitDiff = await pi.exec("git", ["diff", "HEAD~1", "HEAD"], { timeout: 15000 });
+    if (lastCommitDiff.code !== 0 || !lastCommitDiff.stdout.trim()) return null;
+
+    const truncated = truncateDiff(lastCommitDiff.stdout.trim(), 30000);
+    const commitLog = (
+      await pi.exec("git", ["log", "--oneline", "-10"], { timeout: 5000 })
+    ).stdout.trim();
+    const nameResult = await pi.exec("git", ["diff", "HEAD~1", "HEAD", "--name-only"], { timeout: 5000 });
+    const files =
+      nameResult.code === 0 ? nameResult.stdout.trim().split("\n").filter(Boolean) : [];
+
+    const { sections: fileSections } = await readChangedFiles(pi, files, { onStatus });
+    const fileSection = fileSections.length > 0
+      ? `\n\n## Full file contents\n\n${fileSections.join("\n\n")}`
+      : "";
+
+    log("path3: last commit, files=", files);
+    return {
+      content: `## Recent commits\n\`\`\`\n${commitLog}\n\`\`\`${fileSection}\n\n## Diff\n\`\`\`diff\n${truncated}\n\`\`\`${summarySection}`,
+      label: "last commit",
+      files,
+    };
+  } catch {
+    return null;
+  }
+}
+
+// ── Path 4: read files directly from tool calls (no git) ──
+
+export async function getContentFromToolCalls(
+  pi: ExtensionAPI,
+  agentToolCalls: TrackedToolCall[],
+  changeSummary: string,
+  onStatus?: (msg: string) => void,
+): Promise<ReviewContent | null> {
+  if (agentToolCalls.length === 0) return null;
+
+  const candidatePaths = collectModifiedPaths(agentToolCalls);
+  const parts: string[] = [];
+  const reviewedFiles: string[] = [];
+
+  for (const filePath of candidatePaths) {
+    if (isBinaryPath(filePath)) continue;
+
+    onStatus?.(`reading ${filePath}…`);
+    try {
+      const result = await pi.exec(
+        "head", ["-c", String(MAX_NON_GIT_FILE_SIZE + 100), filePath],
+        { timeout: 5000 },
+      );
+      if (result.code !== 0 || !result.stdout) continue;
+      if (result.stdout.includes("\0")) continue;
+      if (result.stdout.length > MAX_NON_GIT_FILE_SIZE) continue;
+
+      reviewedFiles.push(filePath);
+      const fileContent =
+        result.stdout.length > 10000
+          ? result.stdout.slice(0, 10000) + `\n\n... (truncated, ${result.stdout.length} total chars)`
+          : result.stdout;
+      parts.push(`### ${filePath}\n\`\`\`\n${fileContent}\n\`\`\``);
+    } catch {
+      // skip unreadable files
+    }
+  }
+
+  if (parts.length === 0 && !changeSummary.trim()) return null;
+
+  const content = [
+    parts.length > 0 ? `## Files (read directly, no git)\n\n${parts.join("\n\n")}` : "",
+    changeSummary.trim() ? `## Tool call summary\n\n${changeSummary}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n---\n\n");
+
+  return { content, label: "tracked changes", files: reviewedFiles };
+}
+
+// ── Main entry: try each path in order ───────────────
+
 /**
  * Get the best available review content.
- * Tries: git diff from detected repos → git diff from cwd → tool call summaries.
+ * Tries: git roots → cwd git repo → last commit → tool call summaries.
  */
 export async function getBestReviewContent(
   pi: ExtensionAPI,
@@ -217,238 +478,18 @@ export async function getBestReviewContent(
 ): Promise<ReviewContent | null> {
   log("getBestReviewContent: gitRoots=", gitRoots ? [...gitRoots] : "none", "toolCalls=", agentToolCalls.length);
 
-  // Build tool call summary once for all paths
-  const changeSummary = buildChangeSummary(agentToolCalls);
-  const summarySection = changeSummary.trim()
-    ? `\n\n---\n\n## Agent tool calls (what was changed)\n\n${changeSummary}`
-    : "";
+  const { summarySection, changeSummary } = buildSummarySection(agentToolCalls);
 
-  // 1. Try each known git root
   if (gitRoots && gitRoots.size > 0) {
-    const allContexts: string[] = [];
-    const allFiles: string[] = [];
-
-    for (const root of gitRoots) {
-      onStatus?.(`checking ${root}…`);
-
-      // Try uncommitted changes, then fall back to last commit
-      let diff = "";
-      let files: string[] = [];
-      let commitLabel = "";
-      const untrackedFiles = new Set<string>();
-
-      const result = await pi.exec("git", ["-C", root, "diff", "HEAD"], { timeout: 15000 });
-      if (result.code === 0 && result.stdout.trim()) {
-        diff = result.stdout.trim();
-        const nameResult = await pi.exec("git", ["-C", root, "diff", "HEAD", "--name-only"], {
-          timeout: 5000,
-        });
-        files =
-          nameResult.code === 0 ? nameResult.stdout.trim().split("\n").filter(Boolean) : [];
-
-        // Also include untracked (new) files — git diff HEAD misses them
-        const untrackedResult = await pi.exec(
-          "git", ["-C", root, "ls-files", "--others", "--exclude-standard"],
-          { timeout: 5000 },
-        );
-        if (untrackedResult.code === 0 && untrackedResult.stdout.trim()) {
-          const untracked = untrackedResult.stdout.trim().split("\n").filter(Boolean);
-          const existing = new Set(files);
-          for (const f of untracked) {
-            if (!existing.has(f)) {
-              files.push(f);
-              untrackedFiles.add(f);
-            }
-          }
-        }
-      } else {
-        // Try last commit
-        const lastResult = await pi.exec("git", ["-C", root, "diff", "HEAD~1", "HEAD"], {
-          timeout: 15000,
-        });
-        if (lastResult.code === 0 && lastResult.stdout.trim()) {
-          diff = lastResult.stdout.trim();
-          const logResult = await pi.exec("git", ["-C", root, "log", "--oneline", "-1"], {
-            timeout: 5000,
-          });
-          commitLabel = ` (last commit: ${logResult.stdout.trim()})`;
-          const nameResult = await pi.exec(
-            "git",
-            ["-C", root, "diff", "HEAD~1", "HEAD", "--name-only"],
-            { timeout: 5000 },
-          );
-          files =
-            nameResult.code === 0 ? nameResult.stdout.trim().split("\n").filter(Boolean) : [];
-        }
-      }
-
-      // If no diff from tracked changes, check for untracked files only
-      if (!diff) {
-        const untrackedResult = await pi.exec(
-          "git", ["-C", root, "ls-files", "--others", "--exclude-standard"],
-          { timeout: 5000 },
-        );
-        if (untrackedResult.code === 0 && untrackedResult.stdout.trim()) {
-          files = untrackedResult.stdout.trim().split("\n").filter(Boolean);
-          for (const f of files) untrackedFiles.add(f);
-        }
-        if (files.length === 0) continue;
-      }
-
-      const filteredFiles = ignorePatterns ? filterIgnored(files, ignorePatterns) : files;
-      if (filteredFiles.length === 0) continue;
-
-      allFiles.push(...filteredFiles.map((f) => `${root}/${f}`));
-
-      // Read full contents of each changed file
-      const { sections: fileSections } = await readChangedFiles(pi, filteredFiles, {
-        root,
-        newFiles: untrackedFiles,
-        onStatus,
-      });
-
-      // Re-run diff scoped to filtered files only (use correct range)
-      let scopedDiff = diff;
-      if (ignorePatterns && filteredFiles.length < files.length) {
-        const scopedArgs = commitLabel
-          ? ["diff", "HEAD~1", "HEAD", "--", ...filteredFiles]   // last commit
-          : ["diff", "HEAD", "--", ...filteredFiles];            // uncommitted
-        const scopedResult = await pi.exec("git", ["-C", root, ...scopedArgs], { timeout: 15000 });
-        if (scopedResult.code === 0 && scopedResult.stdout.trim()) {
-          scopedDiff = scopedResult.stdout.trim();
-        }
-      }
-
-      log("path1: root=", root, "diff=", diff.length, "files=", filteredFiles, "fileSections=", fileSections.length);
-
-      // Get recent commit messages for context
-      const commitLogResult = await pi.exec(
-        "git", ["-C", root, "log", "--oneline", "-10"],
-        { timeout: 5000 },
-      );
-      const commitLog = commitLogResult.code === 0 ? commitLogResult.stdout.trim() : "";
-      const commitSection = commitLog
-        ? `## Recent commits\n\`\`\`\n${commitLog}\n\`\`\`\n\n`
-        : "";
-
-      const fileList = filteredFiles
-        .map(f => untrackedFiles.has(f) ? `${f} (new)` : f)
-        .join(", ");
-
-      allContexts.push(
-        `## Repo: ${root}${commitLabel}\n\n` +
-        `Changed files: ${fileList}\n\n` +
-        commitSection +
-        `## Full file contents\n\n${fileSections.join("\n\n")}\n\n` +
-        `## Git diff\n\`\`\`diff\n${truncateDiff(scopedDiff, 30000)}\n\`\`\``,
-      )
-    }
-
-    if (allContexts.length > 0) {
-      log("path1: returning", allContexts.length, "repo(s)", "files=", allFiles);
-      return {
-        content: allContexts.join("\n\n---\n\n") + summarySection,
-        label: `${allContexts.length} repo(s)`,
-        files: allFiles,
-      };
-    }
+    const result = await getContentFromGitRoots(pi, gitRoots, ignorePatterns, summarySection, onStatus);
+    if (result) return result;
   }
 
-  // 2. Fallback: try cwd as git repo
-  const reviewContext = await buildReviewContext(pi, onStatus, ignorePatterns);
-  if (reviewContext) {
-    log("path2: cwd git repo, files=", reviewContext.changedFiles);
-    return {
-      content: formatReviewContext(reviewContext) + summarySection,
-      label: "",
-      files: reviewContext.changedFiles,
-    };
-  }
+  const cwdResult = await getContentFromCwd(pi, ignorePatterns, summarySection, onStatus);
+  if (cwdResult) return cwdResult;
 
-  // 3. Try last commit from cwd
-  onStatus?.("checking last commit…");
-  try {
-    const lastCommitDiff = await pi.exec("git", ["diff", "HEAD~1", "HEAD"], { timeout: 15000 });
-    if (lastCommitDiff.code === 0 && lastCommitDiff.stdout.trim()) {
-      const truncated = truncateDiff(lastCommitDiff.stdout.trim(), 30000);
-      const commitLog = (
-        await pi.exec("git", ["log", "--oneline", "-10"], { timeout: 5000 })
-      ).stdout.trim();
-      const nameResult = await pi.exec("git", ["diff", "HEAD~1", "HEAD", "--name-only"], {
-        timeout: 5000,
-      });
-      const files =
-        nameResult.code === 0 ? nameResult.stdout.trim().split("\n").filter(Boolean) : [];
+  const lastCommitResult = await getContentFromLastCommit(pi, summarySection, onStatus);
+  if (lastCommitResult) return lastCommitResult;
 
-      // Read full contents of changed files
-      const { sections: fileSections } = await readChangedFiles(pi, files, { onStatus });
-
-      const fileSection = fileSections.length > 0
-        ? `\n\n## Full file contents\n\n${fileSections.join("\n\n")}`
-        : "";
-
-      log("path3: last commit, files=", files);
-
-      return {
-        content: `## Recent commits\n\`\`\`\n${commitLog}\n\`\`\`${fileSection}\n\n## Diff\n\`\`\`diff\n${truncated}\n\`\`\`${summarySection}`,
-        label: "last commit",
-        files,
-      };
-    }
-  } catch {
-    /* git not available */
-  }
-
-  // 4. Fall back: read files directly (no git available)
-  // Collect all potential file paths from tool calls and read them
-  if (agentToolCalls.length > 0) {
-    const candidatePaths = collectModifiedPaths(agentToolCalls);
-
-    const parts: string[] = [];
-    const reviewedFiles: string[] = [];
-
-    for (const filePath of candidatePaths) {
-      if (isBinaryPath(filePath)) continue;
-
-      onStatus?.(`reading ${filePath}…`);
-      try {
-        const result = await pi.exec(
-          "head",
-          ["-c", String(MAX_NON_GIT_FILE_SIZE + 100), filePath],
-          { timeout: 5000 },
-        );
-        if (result.code !== 0 || !result.stdout) continue;
-
-        // Skip files that look binary (contain null bytes)
-        if (result.stdout.includes("\0")) continue;
-
-        // Skip files larger than limit
-        if (result.stdout.length > MAX_NON_GIT_FILE_SIZE) continue;
-
-        reviewedFiles.push(filePath);
-        const fileContent =
-          result.stdout.length > 10000
-            ? result.stdout.slice(0, 10000) +
-              `\n\n... (truncated, ${result.stdout.length} total chars)`
-            : result.stdout;
-        parts.push(`### ${filePath}\n\`\`\`\n${fileContent}\n\`\`\``);
-      } catch {
-        // File doesn't exist or can't be read — skip
-      }
-    }
-
-    // Also include the tool call summary for context
-    if (parts.length > 0 || changeSummary.trim()) {
-      const content = [
-        parts.length > 0 ? `## Files (read directly, no git)\n\n${parts.join("\n\n")}` : "",
-        changeSummary.trim() ? `## Tool call summary\n\n${changeSummary}` : "",
-      ]
-        .filter(Boolean)
-        .join("\n\n---\n\n");
-
-      return { content, label: "tracked changes", files: reviewedFiles };
-    }
-  }
-
-  return null;
+  return getContentFromToolCalls(pi, agentToolCalls, changeSummary, onStatus);
 }

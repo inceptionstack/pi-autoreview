@@ -45,25 +45,28 @@
 
 ### 6. `getBestReviewContent` ~260 lines — god function
 **Fix:** Extract each path:
-- `getContentFromGitRoots()`
+- `getContentFromGitRoots()` + private `buildRepoContext()` / `listDiffFiles()` / `listUntrackedFiles()`
 - `getContentFromCwd()`
 - `getContentFromLastCommit()`
 - `getContentFromToolCalls()`
-**Status:** [ ] (deferred — each path is now clean with shared helpers)
+- Main `getBestReviewContent()` is now ~20 lines of orchestration
+**Status:** [x] Done
 
 ## Tests
 
-### Current: 101 tests (8 files)
+### Current: 162 tests (10 files)
 | File | Tests | Coverage |
 |------|-------|----------|
 | `test/helpers.test.ts` | 11 | `helpers.ts` fully covered |
 | `test/ignore.test.ts` | 14 | `ignore.ts` fully covered |
-| `test/changes.test.ts` | 24 | `changes.ts` fully covered |
+| `test/changes.test.ts` | 43 | `changes.ts` fully covered (incl. `isNonFileModifyingCommand`) |
 | `test/settings.test.ts` | 19 | `settings.ts` parseSettings fully covered |
 | `test/prompt.test.ts` | 7 | `prompt.ts` fully covered |
 | `test/reviewer.test.ts` | 15 | `reviewer.ts` cleanReviewText + isLgtmResult |
 | `test/context.test.ts` | 6 | `context.ts` formatReviewContext |
 | `test/roundup.test.ts` | 5 | `roundup.ts` buildRoundupPrompt |
+| `test/git-roots.test.ts` | 17 | `git-roots.ts` fully covered (incl. tilde expansion) |
+| `test/readChangedFiles.test.ts` | 12 | `context.ts` readChangedFiles |
 
 ### Missing tests
 
@@ -74,8 +77,8 @@
 | T3 | `buildRoundupPrompt` | `roundup.ts` | [x] 5 tests |
 | T4 | `buildReviewPrompt` | `prompt.ts` | [x] 7 tests |
 | T5 | reviewer text cleanup | `reviewer.ts` | [x] 15 tests |
-| T6 | `resolveGitRoots` + tilde expansion | `git-roots.ts` | [ ] |
-| T7 | `readChangedFiles` (after extract) | `context.ts` | [ ] |
+| T6 | `resolveGitRoots` + tilde expansion | `git-roots.ts` | [x] 17 tests |
+| T7 | `readChangedFiles` | `context.ts` | [x] 12 tests |
 
 ## Execution Order
 
@@ -84,7 +87,7 @@
 3. **Extract `readChangedFiles`** (#1) — [x] Done
 4. **Extract `resolveAllGitRoots`** (#2) — [x] Done
 5. **Build changeSummary once** (#3) — [x] Done
-6. **Split `getBestReviewContent`** (#6) — depends on 3, 4, 5
+6. **Split `getBestReviewContent`** (#6) — [x] Done, 4 path functions
 7. **Extract `finishReview`** (#4) — [x] Done
 8. **Extract reviewer cleanup regex** (T5) + tests — [x] Done, 15 tests
 9. **Add remaining tests** (T2, T3) — [x] Done, 11 tests
