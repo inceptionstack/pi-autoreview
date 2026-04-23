@@ -224,68 +224,78 @@ export default function (pi: ExtensionAPI) {
     ctx.ui.setStatus("code-review", `${label} ${state} ${theme.fg("dim", "(Shift+R toggle)")}`);
   }
 
+  let isToggling = false;
+  const MAX_TRACKED_FILES = 1000;
+
   async function toggleReview(ctx: { ui: any; hasUI?: boolean; cwd: string }) {
-    reviewEnabled = !reviewEnabled;
-    if (reviewEnabled) {
-      reviewLoopCount = 0;
-      if (ctx.hasUI) ctx.ui.notify(`Auto-review: on`, "info");
-      // If there are pending file changes tracked while off, offer to review now
-      if (modifiedFiles.size > 0 && ctx.hasUI) {
-        const count = modifiedFiles.size;
-        const ok = await ctx.ui.confirm(
-          "Run review now?",
-          `${count} file${count > 1 ? "s" : ""} changed while auto-review was off. Review them now?`,
-        );
-        if (ok) {
-          // Trigger a review by sending a message that will trigger agent_end flow
-          // Simpler: just run the review directly
-          reviewLoopCount++;
-          isReviewing = true;
-          reviewAbort = new AbortController();
-          updateStatus(ctx);
-          try {
-            const reviewContext = await buildReviewContext(
-              pi as any,
-              (msg) => updateStatus(ctx, msg),
-              ignorePatterns ?? undefined,
-            );
-            if (reviewContext) {
-              updateStatus(ctx, "analyzing…");
-              const contextSection = formatReviewContext(reviewContext);
-              const prompt = `${buildReviewPrompt()}\n\n---\n\n${contextSection}`;
-              const result = await runReviewSession(prompt, {
-                signal: reviewAbort.signal,
-                cwd: ctx.cwd,
-                model: settings.model,
-                onActivity: (desc) => updateStatus(ctx, desc),
-              });
-              if (result.isLgtm) reviewLoopCount = 0;
-              sendReviewResult(pi, result, "", {
-                showLoopCount: result.isLgtm
-                  ? undefined
-                  : `loop ${reviewLoopCount}/${settings.maxReviewLoops}`,
-              });
-            } else {
-              ctx.ui.notify("No diff found to review.", "info");
+    if (isToggling) return;
+    isToggling = true;
+
+    try {
+      reviewEnabled = !reviewEnabled;
+      if (reviewEnabled) {
+        reviewLoopCount = 0;
+        if (ctx.hasUI) ctx.ui.notify(`Auto-review: on`, "info");
+        if (modifiedFiles.size > 0 && ctx.hasUI) {
+          const count = modifiedFiles.size;
+          const ok = await ctx.ui.confirm(
+            "Run review now?",
+            `${count} file${count > 1 ? "s" : ""} changed while auto-review was off. Review them now?`,
+          );
+          if (ok) {
+            reviewLoopCount++;
+            isReviewing = true;
+            reviewAbort = new AbortController();
+            updateStatus(ctx);
+            try {
+              const reviewContext = await buildReviewContext(
+                pi as any,
+                (msg) => updateStatus(ctx, msg),
+                ignorePatterns ?? undefined,
+              );
+              if (reviewContext) {
+                updateStatus(ctx, "analyzing…");
+                const contextSection = formatReviewContext(reviewContext);
+                const prompt = `${buildReviewPrompt()}\n\n---\n\n${contextSection}`;
+                const result = await runReviewSession(prompt, {
+                  signal: reviewAbort.signal,
+                  cwd: ctx.cwd,
+                  model: settings.model,
+                  onActivity: (desc) => updateStatus(ctx, desc),
+                });
+                if (result.isLgtm) reviewLoopCount = 0;
+                sendReviewResult(pi, result, "", {
+                  showLoopCount: result.isLgtm
+                    ? undefined
+                    : `loop ${reviewLoopCount}/${settings.maxReviewLoops}`,
+                });
+              } else {
+                ctx.ui.notify("No diff found to review.", "info");
+              }
+            } catch (err: any) {
+              if (err?.message === "Review cancelled") {
+                ctx.ui.notify("Auto-review cancelled", "info");
+              } else {
+                console.error("[auto-review] Review failed:", err);
+              }
+            } finally {
+              isReviewing = false;
+              reviewAbort = null;
+              resetTrackingState(ctx);
             }
-          } catch (err: any) {
-            if (err?.message === "Review cancelled") {
-              ctx.ui.notify("Auto-review cancelled", "info");
-            } else {
-              console.error("[auto-review] Review failed:", err);
-            }
-          } finally {
-            isReviewing = false;
-            reviewAbort = null;
+            return;
+          } else {
+            // User declined — clear pending so they don't get re-prompted
             resetTrackingState(ctx);
           }
-          return;
         }
+      } else {
+        if (ctx.hasUI) ctx.ui.notify(`Auto-review: off`, "info");
       }
-    } else {
-      if (ctx.hasUI) ctx.ui.notify(`Auto-review: off`, "info");
+      updateStatus(ctx);
+    } finally {
+      isToggling = false;
     }
-    updateStatus(ctx);
   }
 
   // ── Tool call tracking ─────────────────────────────
@@ -294,8 +304,10 @@ export default function (pi: ExtensionAPI) {
     pendingArgs.set(event.toolCallId, { name: event.toolName, input: event.args });
 
     if (isFileModifyingTool(event.toolName, event.args)) {
-      if (event.args?.path) modifiedFiles.add(event.args.path);
-      else modifiedFiles.add("(bash file op)");
+      if (modifiedFiles.size < MAX_TRACKED_FILES) {
+        if (event.args?.path) modifiedFiles.add(event.args.path);
+        else modifiedFiles.add("(bash file op)");
+      }
       updateStatus(ctx);
     }
   });
@@ -321,6 +333,9 @@ export default function (pi: ExtensionAPI) {
   // ── Auto-review on agent_end ───────────────────────
 
   pi.on("agent_end", async (_event, ctx) => {
+    // Don't interfere if a toggle-review is in progress (confirm dialog open)
+    if (isToggling) return;
+
     if (!reviewEnabled) {
       // Keep tracking state (modifiedFiles, agentToolCalls) so we can
       // offer to review when the user toggles review back on.
