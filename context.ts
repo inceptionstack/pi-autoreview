@@ -8,7 +8,13 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { truncateDiff } from "./helpers";
 import { filterIgnored } from "./ignore";
-import { type TrackedToolCall, buildChangeSummary } from "./changes";
+import {
+  type TrackedToolCall,
+  buildChangeSummary,
+  collectModifiedPaths,
+  isBinaryPath,
+  MAX_NON_GIT_FILE_SIZE,
+} from "./changes";
 
 export interface ReviewContext {
   diff: string;
@@ -250,7 +256,6 @@ export async function getBestReviewContent(
   // 4. Fall back: read files directly (no git available)
   // Collect all potential file paths from tool calls and read them
   if (agentToolCalls.length > 0) {
-    const { collectModifiedPaths, isBinaryPath, MAX_NON_GIT_FILE_SIZE } = await import("./changes");
     const candidatePaths = collectModifiedPaths(agentToolCalls);
 
     const parts: string[] = [];
@@ -275,7 +280,12 @@ export async function getBestReviewContent(
         if (result.stdout.length > MAX_NON_GIT_FILE_SIZE) continue;
 
         reviewedFiles.push(filePath);
-        parts.push(`### ${filePath}\n\`\`\`\n${result.stdout.slice(0, 10000)}\n\`\`\``);
+        const fileContent =
+          result.stdout.length > 10000
+            ? result.stdout.slice(0, 10000) +
+              `\n\n... (truncated, ${result.stdout.length} total chars)`
+            : result.stdout;
+        parts.push(`### ${filePath}\n\`\`\`\n${fileContent}\n\`\`\``);
       } catch {
         // File doesn't exist or can't be read — skip
       }
