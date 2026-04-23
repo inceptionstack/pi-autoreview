@@ -30,6 +30,7 @@ import { runReviewSession, sendReviewResult } from "./reviewer";
 import { type TrackedToolCall, hasFileChanges, isFileModifyingTool } from "./changes";
 import { getBestReviewContent } from "./context";
 import { loadIgnorePatterns } from "./ignore";
+import { loadRoundupRules, runRoundupReview } from "./roundup";
 
 const MAX_TRACKED_FILES = 1000;
 
@@ -176,6 +177,10 @@ export default function (pi: ExtensionAPI) {
   let reviewAbort: AbortController | null = null;
   let isReviewing = false;
   let reviewLoopCount = 0;
+  let peakReviewLoopCount = 0; // highest loop count before LGTM (tracks if fixes happened)
+  let roundupDone = false;
+  let roundupRules: string | null = null;
+  let sessionChangeSummaries: string[] = []; // accumulates change summaries across loops
 
   let settings: AutoReviewSettings = { ...DEFAULT_SETTINGS };
   let customRules: string | null = null;
@@ -248,6 +253,9 @@ export default function (pi: ExtensionAPI) {
       reviewEnabled = !reviewEnabled;
       if (reviewEnabled) {
         reviewLoopCount = 0;
+        peakReviewLoopCount = 0;
+        roundupDone = false;
+        sessionChangeSummaries = [];
         if (ctx.hasUI) ctx.ui.notify(`Auto-review: on`, "info");
         // Only prompt to review if agent is idle and there are pending files.
         // If agent is mid-turn, silently enable — review triggers at next agent_end.
@@ -404,12 +412,46 @@ export default function (pi: ExtensionAPI) {
         onActivity: (desc) => updateStatus(ctx, desc),
       });
 
-      if (result.isLgtm) reviewLoopCount = 0;
-      sendReviewResult(pi, result, "", {
-        showLoopCount: result.isLgtm
-          ? undefined
-          : `loop ${reviewLoopCount}/${settings.maxReviewLoops}`,
-      });
+      // Track change summary for roundup
+      sessionChangeSummaries.push(best.content.slice(0, 5000));
+
+      if (result.isLgtm) {
+        // Check if roundup review should trigger:
+        // - More than 1 review loop happened (fixes were made)
+        // - Roundup hasn't already run this cycle
+        if (peakReviewLoopCount > 1 && !roundupDone) {
+          roundupDone = true;
+          reviewLoopCount = 0;
+          sendReviewResult(pi, result, "");
+
+          // Run roundup
+          updateStatus(ctx, "roundup review…");
+          try {
+            const summaryText = sessionChangeSummaries.join("\n\n---\n\n");
+            await runRoundupReview({
+              pi,
+              signal: reviewAbort!.signal,
+              cwd: ctx.cwd,
+              model: settings.model,
+              customRules: roundupRules,
+              sessionChangeSummary: summaryText,
+              onActivity: (desc) => updateStatus(ctx, `roundup: ${desc}`),
+            });
+          } catch (err: any) {
+            if (err?.message !== "Review cancelled") {
+              console.error("[auto-review] Roundup review failed:", err);
+            }
+          }
+        } else {
+          reviewLoopCount = 0;
+          sendReviewResult(pi, result, "");
+        }
+      } else {
+        peakReviewLoopCount = Math.max(peakReviewLoopCount, reviewLoopCount);
+        sendReviewResult(pi, result, "", {
+          showLoopCount: `loop ${reviewLoopCount}/${settings.maxReviewLoops}`,
+        });
+      }
     } catch (err: any) {
       if (err?.message === "Review cancelled") {
         if (ctx.hasUI) ctx.ui.notify("Auto-review cancelled", "info");
@@ -533,19 +575,25 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_start", async (_event, ctx) => {
     reviewLoopCount = 0;
+    peakReviewLoopCount = 0;
+    roundupDone = false;
+    sessionChangeSummaries = [];
 
-    const [rules, settingsResult, patterns] = await Promise.all([
+    const [rules, settingsResult, patterns, rRules] = await Promise.all([
       loadReviewRules(ctx.cwd),
       loadSettings(ctx.cwd),
       loadIgnorePatterns(ctx.cwd),
+      loadRoundupRules(ctx.cwd),
     ]);
 
     customRules = rules;
     ignorePatterns = patterns;
+    roundupRules = rRules;
     settings = settingsResult.settings;
 
     if (customRules)
       console.log("[auto-review] Loaded custom rules from .autoreview/review-rules.md");
+    if (roundupRules) console.log("[auto-review] Loaded roundup rules from .autoreview/roundup.md");
     if (ignorePatterns)
       console.log(
         `[auto-review] Loaded ${ignorePatterns.length} ignore pattern(s) from .autoreview/ignore`,
