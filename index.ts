@@ -36,6 +36,8 @@ import {
 import { buildReviewContext, formatReviewContext } from "./context";
 import { loadIgnorePatterns } from "./ignore";
 
+const MAX_TRACKED_FILES = 1000;
+
 // ── Default review prompt ────────────────────────────
 
 const DEFAULT_REVIEW_PROMPT = `You are a senior code reviewer. You will be given:
@@ -192,6 +194,7 @@ export default function (pi: ExtensionAPI) {
     agentToolCalls = [];
     modifiedFiles.clear();
     pendingArgs.clear();
+    fileCapWarned = false;
     updateStatus(ctx);
   }
 
@@ -225,7 +228,7 @@ export default function (pi: ExtensionAPI) {
   }
 
   let isToggling = false;
-  const MAX_TRACKED_FILES = 1000;
+  let fileCapWarned = false;
 
   async function toggleReview(ctx: { ui: any; hasUI?: boolean; cwd: string }) {
     if (isToggling) return;
@@ -241,6 +244,7 @@ export default function (pi: ExtensionAPI) {
           const ok = await ctx.ui.confirm(
             "Run review now?",
             `${count} file${count > 1 ? "s" : ""} changed while auto-review was off. Review them now?`,
+            { timeout: 30000 }, // 30s timeout, auto-decline
           );
           if (ok) {
             reviewLoopCount++;
@@ -307,6 +311,11 @@ export default function (pi: ExtensionAPI) {
       if (modifiedFiles.size < MAX_TRACKED_FILES) {
         if (event.args?.path) modifiedFiles.add(event.args.path);
         else modifiedFiles.add("(bash file op)");
+      } else if (!fileCapWarned) {
+        fileCapWarned = true;
+        console.log(
+          `[auto-review] File tracking cap reached (${MAX_TRACKED_FILES}). Additional files won't be tracked.`,
+        );
       }
       updateStatus(ctx);
     }
