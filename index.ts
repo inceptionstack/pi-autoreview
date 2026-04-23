@@ -12,7 +12,7 @@
  * UX:
  *   - Status bar shows auto-review on/off + pending file count
  *   - Alt+R toggles review on/off (configurable: toggleShortcut)
- *   - Alt+X or /cancel-review cancels an in-progress review (configurable: cancelShortcut)
+ *   - Alt+X or /cancel-review cancels an in-progress review (cancelShortcut configurable, default: none)
  *   - Ctrl+Alt+R also cancels (terminals that support it)
  *   - /review command toggles, /review <N> reviews last N commits
  *
@@ -149,9 +149,12 @@ export default function (pi: ExtensionAPI) {
       const modelName = (settings.model || "").split("/").pop() ?? "";
       const modelInfo = theme.fg("dim", modelName);
       const activityInfo = displayActivity ? ` ${theme.fg("muted", displayActivity)}` : "";
+      const cancelHint = shortcutConfig.cancelShortcut
+        ? `${shortcutConfig.cancelShortcut} or /cancel-review`
+        : "/cancel-review";
       ctx.ui.setStatus(
         "code-review",
-        `${label} ${theme.fg("warning", "reviewing…")} ${loopInfo} ${modelInfo}${activityInfo} ${theme.fg("dim", `(${shortcutConfig.cancelShortcut} or /cancel-review)`)}`,
+        `${label} ${theme.fg("warning", "reviewing…")} ${loopInfo} ${modelInfo}${activityInfo} ${theme.fg("dim", `(${cancelHint})`)}`,
       );
       return;
     }
@@ -509,11 +512,14 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
-  // Register configurable cancel shortcut (default: alt+x)
-  pi.registerShortcut(shortcutConfig.cancelShortcut as any, {
-    description: "Cancel in-progress code review",
-    handler: async (ctx) => cancelReview(ctx, shortcutConfig.cancelShortcut),
-  });
+  // Register cancel shortcut only if user explicitly configured one.
+  // Default is no shortcut — /cancel-review command is the reliable cross-terminal method.
+  if (shortcutConfig.cancelShortcut) {
+    pi.registerShortcut(shortcutConfig.cancelShortcut as any, {
+      description: "Cancel in-progress code review",
+      handler: async (ctx) => cancelReview(ctx, shortcutConfig.cancelShortcut),
+    });
+  }
 
   // Also register ctrl+alt+r as a fallback (for terminals that support it)
   if (shortcutConfig.cancelShortcut !== "ctrl+alt+r") {

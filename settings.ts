@@ -59,7 +59,7 @@ export interface AutoReviewSettings {
   roundupEnabled: boolean;
   reviewTimeoutMs: number; // Max wall-clock for a single review (default 120s)
   toggleShortcut: string; // Key id for toggling review on/off (default "alt+r")
-  cancelShortcut: string; // Key id for cancelling in-progress review (default "alt+x")
+  cancelShortcut: string; // Key id for cancelling in-progress review (default: none — use /cancel-review)
 }
 
 /** Shortcut-only settings loaded synchronously at init (before session_start). */
@@ -69,7 +69,7 @@ export interface ShortcutSettings {
 }
 
 export const DEFAULT_TOGGLE_SHORTCUT = "alt+r";
-export const DEFAULT_CANCEL_SHORTCUT = "alt+x";
+export const DEFAULT_CANCEL_SHORTCUT = ""; // no default shortcut — use /cancel-review command
 
 export const DEFAULT_SETTINGS: AutoReviewSettings = {
   maxReviewLoops: 100,
