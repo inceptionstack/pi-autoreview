@@ -211,6 +211,9 @@ export default function (pi: ExtensionAPI) {
     updateStatus(ctx);
   }
 
+  let lastActivity = "";
+  let activityTimer: ReturnType<typeof setTimeout> | undefined;
+
   function updateStatus(ctx: { ui: any; hasUI?: boolean }, activity?: string) {
     if (!ctx.hasUI || !ctx.ui) return;
     const theme = ctx.ui.theme;
@@ -218,11 +221,23 @@ export default function (pi: ExtensionAPI) {
     const state = reviewEnabled ? theme.fg("success", "on") : theme.fg("dim", "off");
 
     if (isReviewing) {
+      // Activity lingers for 1s so you can read it
+      if (activity) {
+        lastActivity = activity;
+        if (activityTimer) clearTimeout(activityTimer);
+        activityTimer = setTimeout(() => {
+          lastActivity = "";
+          updateStatus(ctx);
+        }, 1000);
+      }
+      const displayActivity = activity ?? lastActivity;
       const loopInfo = theme.fg("dim", `[${reviewLoopCount}/${settings.maxReviewLoops}]`);
-      const activityInfo = activity ? ` ${theme.fg("muted", activity)}` : "";
+      const modelName = settings.model.split("/").pop() ?? "";
+      const modelInfo = theme.fg("dim", modelName);
+      const activityInfo = displayActivity ? ` ${theme.fg("muted", displayActivity)}` : "";
       ctx.ui.setStatus(
         "code-review",
-        `${label} ${theme.fg("warning", "reviewing…")} ${loopInfo}${activityInfo} ${theme.fg("dim", "(Ctrl+Alt+R to cancel)")}`,
+        `${label} ${theme.fg("warning", "reviewing…")} ${loopInfo} ${modelInfo}${activityInfo} ${theme.fg("dim", "(Ctrl+Alt+R to cancel)")}`,
       );
       return;
     }
@@ -513,6 +528,11 @@ export default function (pi: ExtensionAPI) {
     } finally {
       isReviewing = false;
       reviewAbort = null;
+      if (activityTimer) {
+        clearTimeout(activityTimer);
+        activityTimer = undefined;
+      }
+      lastActivity = "";
       resetTrackingState(ctx);
     }
   });
@@ -618,6 +638,11 @@ export default function (pi: ExtensionAPI) {
       } finally {
         isReviewing = false;
         reviewAbort = null;
+        if (activityTimer) {
+          clearTimeout(activityTimer);
+          activityTimer = undefined;
+        }
+        lastActivity = "";
         updateStatus(ctx);
       }
     },
