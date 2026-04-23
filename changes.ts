@@ -70,17 +70,35 @@ export interface TrackedToolCall {
  * Note: merge/rebase/reset/checkout CAN modify files so they're NOT here.
  */
 const GIT_READ_ONLY_SUBCOMMANDS = new Set([
-  "push", "commit", "add", "log", "status", "diff", "show",
-  "branch", "tag", "fetch", "remote", "stash", "config",
-  "ls-files", "ls-tree", "rev-parse", "rev-list", "hash-object",
-  "blame", "reflog", "describe", "shortlog",
+  "push",
+  "commit",
+  "add",
+  "log",
+  "status",
+  "diff",
+  "show",
+  "branch",
+  "tag",
+  "fetch",
+  "remote",
+  "stash",
+  "config",
+  "ls-files",
+  "ls-tree",
+  "rev-parse",
+  "rev-list",
+  "hash-object",
+  "blame",
+  "reflog",
+  "describe",
+  "shortlog",
 ]);
 
 /** Command roots that are treated as non-file-modifying regardless of args. */
 const NON_MODIFYING_COMMAND_ROOTS = new Set([
-  "aws",    // AWS CLI — API calls
-  "curl",   // HTTP requests
-  "wget",   // though wget -O writes, treat as non-modifying per user request
+  "aws", // AWS CLI — API calls
+  "curl", // HTTP requests
+  "wget", // though wget -O writes, treat as non-modifying per user request
   "ping",
   "dig",
   "nslookup",
@@ -129,7 +147,10 @@ export function isNonFileModifyingCommand(command: string): boolean {
   if (!command) return false;
 
   // Split on && || ; to handle command chains
-  const parts = command.split(/&&|\|\||;/).map(p => p.trim()).filter(Boolean);
+  const parts = command
+    .split(/&&|\|\||;/)
+    .map((p) => p.trim())
+    .filter(Boolean);
   if (parts.length === 0) return false;
 
   return parts.every(isNonModifyingPart);

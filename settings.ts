@@ -19,21 +19,24 @@ import { homedir } from "node:os";
  * Local takes precedence over global.
  */
 export function configDirs(cwd: string, home?: string): [string, string] {
-  return [
-    join(cwd, ".autoreview"),
-    join(home ?? homedir(), ".pi", ".autoreview"),
-  ];
+  return [join(cwd, ".autoreview"), join(home ?? homedir(), ".pi", ".autoreview")];
 }
 
 /**
  * Read a config file, trying local (cwd/.autoreview/) first, then global (~/.pi/.autoreview/).
  * Returns the file content or null if not found in either location.
  */
-export async function readConfigFile(cwd: string, filename: string, home?: string): Promise<string | null> {
+export async function readConfigFile(
+  cwd: string,
+  filename: string,
+  home?: string,
+): Promise<string | null> {
   for (const dir of configDirs(cwd, home)) {
     try {
       return await readFile(join(dir, filename), "utf8");
-    } catch { /* try next */ }
+    } catch {
+      /* try next */
+    }
   }
   return null;
 }
@@ -45,7 +48,9 @@ function readConfigFileSync(cwd: string, filename: string): string | null {
   for (const dir of configDirs(cwd)) {
     try {
       return readFileSync(join(dir, filename), "utf8");
-    } catch { /* try next */ }
+    } catch {
+      /* try next */
+    }
   }
   return null;
 }
@@ -89,9 +94,10 @@ export const VALID_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high",
  * Parse and validate a raw settings object against the schema.
  * Pure function — no I/O. Returns validated settings + any errors.
  */
-export function parseSettings(
-  parsed: Record<string, unknown>,
-): { settings: AutoReviewSettings; errors: string[] } {
+export function parseSettings(parsed: Record<string, unknown>): {
+  settings: AutoReviewSettings;
+  errors: string[];
+} {
   const errors: string[] = [];
   const settings = { ...DEFAULT_SETTINGS };
 
@@ -120,7 +126,10 @@ export function parseSettings(
   }
 
   if ("thinkingLevel" in parsed) {
-    if (typeof parsed.thinkingLevel === "string" && VALID_THINKING_LEVELS.includes(parsed.thinkingLevel)) {
+    if (
+      typeof parsed.thinkingLevel === "string" &&
+      VALID_THINKING_LEVELS.includes(parsed.thinkingLevel)
+    ) {
       settings.thinkingLevel = parsed.thinkingLevel;
     } else {
       errors.push(
@@ -240,7 +249,9 @@ export function loadShortcutSettingsSync(cwd: string): ShortcutSettings {
     if (typeof parsed.cancelShortcut === "string" && parsed.cancelShortcut.trim()) {
       defaults.cancelShortcut = parsed.cancelShortcut.trim();
     }
-  } catch { /* bad JSON — use defaults */ }
+  } catch {
+    /* bad JSON — use defaults */
+  }
   return defaults;
 }
 

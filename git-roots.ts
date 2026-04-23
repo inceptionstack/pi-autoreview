@@ -20,7 +20,9 @@ export async function findGitRoot(pi: ExtensionAPI, dir: string): Promise<string
     if (result.code === 0 && result.stdout.trim()) {
       return result.stdout.trim();
     }
-  } catch { /* not in a git repo */ }
+  } catch {
+    /* not in a git repo */
+  }
   return null;
 }
 

@@ -185,10 +185,10 @@ export async function runReviewSession(prompt: string, opts: ReviewOptions): Pro
     if (provider && modelId) {
       const model = modelRegistry.find(provider, modelId);
       if (model) {
-        const success = await session.setModel(model);
-        if (success) {
+        try {
+          await session.setModel(model);
           log(`reviewer: using model ${opts.model}`);
-        } else {
+        } catch {
           const defaultName = session.model
             ? `${session.model.provider}/${session.model.id}`
             : "unknown";
@@ -213,8 +213,8 @@ export async function runReviewSession(prompt: string, opts: ReviewOptions): Pro
   session.setThinkingLevel(thinkingLevel);
   log(`reviewer: thinking level = ${thinkingLevel}`);
 
-  let currentText = "";    // always holds the latest assistant message (reset on message_start)
-  let reviewText = "";       // set once after main sendPrompt completes; preserved through retries
+  let currentText = ""; // always holds the latest assistant message (reset on message_start)
+  let reviewText = ""; // set once after main sendPrompt completes; preserved through retries
   const toolCalls: ReviewToolCall[] = [];
 
   const unsub = session.subscribe((ev: AgentSessionEvent) => {

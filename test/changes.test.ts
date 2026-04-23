@@ -215,7 +215,9 @@ describe("isPureGitOperation", () => {
 
 describe("hasFileChanges_withPureGitOps", () => {
   it("hasFileChanges_OnlyGitPush_ReturnsFalse", () => {
-    expect(hasFileChanges([{ name: "bash", input: { command: "git push origin main" } }])).toBe(false);
+    expect(hasFileChanges([{ name: "bash", input: { command: "git push origin main" } }])).toBe(
+      false,
+    );
   });
 
   it("hasFileChanges_GitCommitAndPush_ReturnsFalse", () => {
@@ -309,7 +311,9 @@ describe("hasFileChanges_withAwsCurl", () => {
   });
 
   it("hasFileChanges_OnlyCurl_ReturnsFalse", () => {
-    expect(hasFileChanges([{ name: "bash", input: { command: "curl https://api.com" } }])).toBe(false);
+    expect(hasFileChanges([{ name: "bash", input: { command: "curl https://api.com" } }])).toBe(
+      false,
+    );
   });
 
   it("hasFileChanges_MixedAwsAndEdit_ReturnsTrue", () => {

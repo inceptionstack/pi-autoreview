@@ -11,7 +11,7 @@ Place this file at `.autoreview/settings.json` in your project root.
 
 ## Settings reference
 
-| Setting | Type | Default | Description |
-|---------|------|---------|-------------|
-| `maxReviewLoops` | integer > 0 | 100 | Max review→fix→review cycles before stopping |
-| `model` | string | `amazon-bedrock/anthropic.claude-opus-4-6-v1` | Reviewer model in `provider/model-id` format |
+| Setting          | Type        | Default                                       | Description                                  |
+| ---------------- | ----------- | --------------------------------------------- | -------------------------------------------- |
+| `maxReviewLoops` | integer > 0 | 100                                           | Max review→fix→review cycles before stopping |
+| `model`          | string      | `amazon-bedrock/anthropic.claude-opus-4-6-v1` | Reviewer model in `provider/model-id` format |

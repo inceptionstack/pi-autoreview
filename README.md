@@ -82,15 +82,15 @@ All config files are optional. If missing, sensible defaults are used.
 }
 ```
 
-| Setting           | Type        | Default                                            | Description                                         |
-| ----------------- | ----------- | -------------------------------------------------- | --------------------------------------------------- |
-| `maxReviewLoops`  | integer > 0 | `100`                                              | Max review→fix→review cycles before stopping        |
-| `model`           | string      | `"amazon-bedrock/us.anthropic.claude-opus-4-6-v1"` | Reviewer model (`"provider/model-id"`)              |
+| Setting           | Type        | Default                                            | Description                                        |
+| ----------------- | ----------- | -------------------------------------------------- | -------------------------------------------------- |
+| `maxReviewLoops`  | integer > 0 | `100`                                              | Max review→fix→review cycles before stopping       |
+| `model`           | string      | `"amazon-bedrock/us.anthropic.claude-opus-4-6-v1"` | Reviewer model (`"provider/model-id"`)             |
 | `thinkingLevel`   | string      | `"off"`                                            | `off\|minimal\|low\|medium\|high\|xhigh`           |
-| `roundupEnabled`  | boolean     | `true`                                             | Enable roundup reviews (gated by heuristics+judge)  |
-| `reviewTimeoutMs` | integer > 0 | `120000`                                           | Max wall-clock per review in ms                     |
-| `toggleShortcut`  | string      | `"alt+r"`                                          | Key id for toggling review on/off                   |
-| `cancelShortcut`  | string      | `""` (none)                                        | Key id for cancelling review (opt-in, see below)    |
+| `roundupEnabled`  | boolean     | `true`                                             | Enable roundup reviews (gated by heuristics+judge) |
+| `reviewTimeoutMs` | integer > 0 | `120000`                                           | Max wall-clock per review in ms                    |
+| `toggleShortcut`  | string      | `"alt+r"`                                          | Key id for toggling review on/off                  |
+| `cancelShortcut`  | string      | `""` (none)                                        | Key id for cancelling review (opt-in, see below)   |
 
 ### `.autoreview/review-rules.md`
 
@@ -143,20 +143,20 @@ src/vendor/**
 
 ### Commands
 
-| Command           | Description                                          |
-| ----------------- | ---------------------------------------------------- |
-| `/review`         | Toggle auto-review on/off                            |
-| `/review N`       | Review the last N commits                            |
-| `/cancel-review`  | Cancel an in-progress review (works during roundup)  |
+| Command          | Description                                         |
+| ---------------- | --------------------------------------------------- |
+| `/review`        | Toggle auto-review on/off                           |
+| `/review N`      | Review the last N commits                           |
+| `/cancel-review` | Cancel an in-progress review (works during roundup) |
 
 ### Keyboard shortcuts
 
-| Key                  | Default   | Configurable | Action                                            |
-| -------------------- | --------- | ------------ | ------------------------------------------------- |
-| Toggle shortcut      | `alt+r`   | `toggleShortcut` | Toggle auto-review on/off                     |
-| Cancel shortcut      | _(none)_  | `cancelShortcut` | Cancel in-progress review                     |
-| `ctrl+alt+r`         | built-in  | no           | Cancel review (fallback, terminals that support it)|
-| `ctrl+alt+shift+r`   | built-in  | no           | Full reset: cancel, reset loops, clear all state  |
+| Key                | Default  | Configurable     | Action                                              |
+| ------------------ | -------- | ---------------- | --------------------------------------------------- |
+| Toggle shortcut    | `alt+r`  | `toggleShortcut` | Toggle auto-review on/off                           |
+| Cancel shortcut    | _(none)_ | `cancelShortcut` | Cancel in-progress review                           |
+| `ctrl+alt+r`       | built-in | no               | Cancel review (fallback, terminals that support it) |
+| `ctrl+alt+shift+r` | built-in | no               | Full reset: cancel, reset loops, clear all state    |
 
 > **Note:** `/cancel-review` is the recommended cancel method. It works in all terminals. Keyboard shortcuts for cancel are opt-in via `cancelShortcut` in settings because many terminals (especially iTerm2 on macOS) don't reliably send modifier key combos.
 
@@ -173,17 +173,20 @@ src/vendor/**
 After the review loop reaches LGTM, a **roundup review** may trigger automatically. It's gated by a two-stage filter to avoid wasting time on trivial changes:
 
 **Stage 1 — Cheap heuristics (instant):**
+
 - Skip if < 3 files changed across the session
 - Skip if only test files changed
 - Skip if no fix loops happened (first-pass LGTM)
 
 **Stage 2 — LLM judge (2-5 seconds):**
+
 - A quick LLM call decides if the changes warrant a broader architecture review
 - Gets: file list, fix loop count, change summaries
 - Valuable after: multi-module refactoring, new interfaces, complex fix loops
 - Not needed for: localized bug fixes, additive changes, config/docs
 
 If the judge recommends it, the full roundup review runs. It:
+
 - Checks architecture coherence across all changes
 - Verifies cross-file consistency (naming, patterns, types)
 - Looks for accumulated tech debt from fix loops

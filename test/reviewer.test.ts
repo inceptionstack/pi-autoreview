@@ -134,7 +134,9 @@ describe("parseVerdict", () => {
   });
 
   it("parseVerdict_InMiddleOfText_StillFound", () => {
-    expect(parseVerdict("Some review here.\n<verdict>ISSUES_FOUND</verdict>\nMore.")).toBe("issues");
+    expect(parseVerdict("Some review here.\n<verdict>ISSUES_FOUND</verdict>\nMore.")).toBe(
+      "issues",
+    );
   });
 
   it("parseVerdict_EmptyString_ReturnsNull", () => {
@@ -152,6 +154,8 @@ describe("stripVerdict", () => {
   });
 
   it("stripVerdict_MultipleVerdictTags_RemovesAll", () => {
-    expect(stripVerdict("A\n<verdict>LGTM</verdict>\nB\n<verdict>ISSUES_FOUND</verdict>")).toBe("A\n\nB");
+    expect(stripVerdict("A\n<verdict>LGTM</verdict>\nB\n<verdict>ISSUES_FOUND</verdict>")).toBe(
+      "A\n\nB",
+    );
   });
 });

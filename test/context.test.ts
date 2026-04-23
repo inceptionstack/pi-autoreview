@@ -28,7 +28,10 @@ describe("formatReviewContext", () => {
   it("formatReviewContext_MultipleFiles_ListsAll", () => {
     const ctx = makeContext({
       changedFiles: ["a.ts", "b.ts"],
-      fileContents: new Map([["a.ts", "a"], ["b.ts", "b"]]),
+      fileContents: new Map([
+        ["a.ts", "a"],
+        ["b.ts", "b"],
+      ]),
     });
     const result = formatReviewContext(ctx);
     expect(result).toContain("## Changed files (2)");

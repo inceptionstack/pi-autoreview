@@ -25,14 +25,30 @@ import { createHash } from "node:crypto";
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
-import { type AutoReviewSettings, DEFAULT_SETTINGS, loadSettings, loadReviewRules, loadShortcutSettingsSync } from "./settings";
+import {
+  type AutoReviewSettings,
+  DEFAULT_SETTINGS,
+  loadSettings,
+  loadReviewRules,
+  loadShortcutSettingsSync,
+} from "./settings";
 import { buildReviewPrompt } from "./prompt";
 import { clampCommitCount, shouldDiffAllCommits, truncateDiff } from "./helpers";
 import { runReviewSession, sendReviewResult } from "./reviewer";
-import { type TrackedToolCall, hasFileChanges, isFileModifyingTool, collectModifiedPaths } from "./changes";
+import {
+  type TrackedToolCall,
+  hasFileChanges,
+  isFileModifyingTool,
+  collectModifiedPaths,
+} from "./changes";
 import { getBestReviewContent } from "./context";
 import { loadIgnorePatterns, filterIgnored } from "./ignore";
-import { loadRoundupRules, runRoundupReview, checkRoundupHeuristics, runRoundupJudge } from "./roundup";
+import {
+  loadRoundupRules,
+  runRoundupReview,
+  checkRoundupHeuristics,
+  runRoundupJudge,
+} from "./roundup";
 import { findGitRoot, resolveAllGitRoots } from "./git-roots";
 import { log, logRotate } from "./logger";
 
@@ -167,7 +183,9 @@ export default function (pi: ExtensionAPI) {
       allPaths.delete("(bash file op)");
       const count = allPaths.size;
       if (count > 0) {
-        const verb = reviewEnabled ? theme.fg("muted", "will review") : theme.fg("muted", "pending");
+        const verb = reviewEnabled
+          ? theme.fg("muted", "will review")
+          : theme.fg("muted", "pending");
         const issueIndicator = lastReviewHadIssues ? ` ${theme.fg("error", "issues found")}` : "";
         ctx.ui.setStatus(
           "code-review",
@@ -224,7 +242,11 @@ export default function (pi: ExtensionAPI) {
             try {
               // Resolve git roots from tracked files, tool call paths, and detected bash git commands
               const allRoots = await resolveAllGitRoots(
-                pi, ctx.cwd, modifiedFiles, collectModifiedPaths(agentToolCalls), detectedGitRoots,
+                pi,
+                ctx.cwd,
+                modifiedFiles,
+                collectModifiedPaths(agentToolCalls),
+                detectedGitRoots,
               );
 
               logRotate("=== review start ===");
@@ -242,7 +264,12 @@ export default function (pi: ExtensionAPI) {
                 allRoots,
               );
 
-              log("best:", best ? { label: best.label, files: best.files, contentLen: best.content.length } : "null");
+              log(
+                "best:",
+                best
+                  ? { label: best.label, files: best.files, contentLen: best.content.length }
+                  : "null",
+              );
 
               if (best) {
                 updateStatus(ctx, "analyzing…");
@@ -250,9 +277,15 @@ export default function (pi: ExtensionAPI) {
                 log("prompt length:", prompt.length);
                 const result = await runReviewSession(
                   prompt,
-                  buildReviewOptions(reviewAbort.signal, ctx.cwd, best.files, (desc) => updateStatus(ctx, desc)),
+                  buildReviewOptions(reviewAbort.signal, ctx.cwd, best.files, (desc) =>
+                    updateStatus(ctx, desc),
+                  ),
                 );
-                log("result:", { isLgtm: result.isLgtm, durationMs: result.durationMs, textLen: result.text.length });
+                log("result:", {
+                  isLgtm: result.isLgtm,
+                  durationMs: result.durationMs,
+                  textLen: result.text.length,
+                });
                 if (result.isLgtm) reviewLoopCount = 0;
                 sendReviewResult(pi, result, best.label, { reviewedFiles: best.files });
               } else {
@@ -377,7 +410,7 @@ export default function (pi: ExtensionAPI) {
     // Skip review if no real file paths were modified
     // (bash-only turns like cat/tail/ls shouldn't trigger review)
     const realFiles = new Set([
-      ...[...modifiedFiles].filter(f => f !== "(bash file op)"),
+      ...[...modifiedFiles].filter((f) => f !== "(bash file op)"),
       ...collectModifiedPaths(agentToolCalls),
     ]);
     if (realFiles.size === 0) {
@@ -394,7 +427,11 @@ export default function (pi: ExtensionAPI) {
     try {
       // Resolve git roots from tracked files, tool call paths, and detected bash git commands
       const allRoots = await resolveAllGitRoots(
-        pi, ctx.cwd, modifiedFiles, collectModifiedPaths(agentToolCalls), detectedGitRoots,
+        pi,
+        ctx.cwd,
+        modifiedFiles,
+        collectModifiedPaths(agentToolCalls),
+        detectedGitRoots,
       );
 
       logRotate("=== review start (auto) ===");
@@ -429,11 +466,15 @@ export default function (pi: ExtensionAPI) {
       }
 
       updateStatus(ctx, "analyzing…");
-      log(`Reviewing ${best.files.length} files via ${best.label || "git diff"}: ${best.files.join(", ")}`);
+      log(
+        `Reviewing ${best.files.length} files via ${best.label || "git diff"}: ${best.files.join(", ")}`,
+      );
       const prompt = `${buildReviewPrompt(customRules)}\n\n---\n\n${best.content}`;
       const result = await runReviewSession(
         prompt,
-        buildReviewOptions(reviewAbort.signal, ctx.cwd, best.files, (desc) => updateStatus(ctx, desc)),
+        buildReviewOptions(reviewAbort.signal, ctx.cwd, best.files, (desc) =>
+          updateStatus(ctx, desc),
+        ),
       );
 
       // Track change summary and files for roundup
@@ -626,8 +667,7 @@ export default function (pi: ExtensionAPI) {
         const countResult = await pi.exec("git", ["rev-list", "--count", "HEAD"], {
           timeout: 5000,
         });
-        if (countResult.code !== 0)
-          log(`git rev-list failed: ${countResult.stderr.trim()}`);
+        if (countResult.code !== 0) log(`git rev-list failed: ${countResult.stderr.trim()}`);
 
         const totalCommits = parseInt(countResult.stdout.trim(), 10) || 0;
         if (totalCommits === 0) {
@@ -665,7 +705,10 @@ export default function (pi: ExtensionAPI) {
         }
 
         if (changedFiles.length === 0) {
-          ctx.ui.notify(`No reviewable changes in last ${effectiveCount} commit(s) (all ignored).`, "info");
+          ctx.ui.notify(
+            `No reviewable changes in last ${effectiveCount} commit(s) (all ignored).`,
+            "info",
+          );
           return;
         }
 
@@ -731,8 +774,7 @@ export default function (pi: ExtensionAPI) {
     roundupRules = rRules;
     settings = settingsResult.settings;
 
-    if (customRules)
-      log("Loaded custom rules from .autoreview/review-rules.md");
+    if (customRules) log("Loaded custom rules from .autoreview/review-rules.md");
     if (roundupRules) log("Loaded roundup rules from .autoreview/roundup.md");
     if (ignorePatterns)
       log(`Loaded ${ignorePatterns.length} ignore pattern(s) from .autoreview/ignore`);

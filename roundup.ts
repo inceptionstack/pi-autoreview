@@ -104,7 +104,9 @@ export function checkRoundupHeuristics(ctx: RoundupContext): "skip" | "maybe" {
     return "skip";
   }
 
-  log(`roundup heuristic: maybe — ${changedFiles.length} files, ${peakLoopCount} fix loops, ${nonTestFiles.length} non-test`);
+  log(
+    `roundup heuristic: maybe — ${changedFiles.length} files, ${peakLoopCount} fix loops, ${nonTestFiles.length} non-test`,
+  );
   return "maybe";
 }
 
@@ -147,7 +149,9 @@ export interface JudgeOptions {
  * Returns true if the judge recommends a roundup, false otherwise.
  * Tight timeout (20s) — if it fails or times out, defaults to skipping.
  */
-export async function runRoundupJudge(opts: JudgeOptions): Promise<{ recommended: boolean; reason: string }> {
+export async function runRoundupJudge(
+  opts: JudgeOptions,
+): Promise<{ recommended: boolean; reason: string }> {
   const fileList = opts.changedFiles.join("\n");
   const summarySnippet = opts.changeSummaries
     .map((s) => s.slice(0, 2000))
@@ -178,7 +182,9 @@ export async function runRoundupJudge(opts: JudgeOptions): Promise<{ recommended
     });
 
     const recommended = !result.isLgtm;
-    const reason = result.text.slice(0, 200).trim() || (recommended ? "Changes appear complex" : "Changes are localized");
+    const reason =
+      result.text.slice(0, 200).trim() ||
+      (recommended ? "Changes appear complex" : "Changes are localized");
     log(`roundup judge: ${recommended ? "YES" : "NO"} — ${reason} (${result.durationMs}ms)`);
     return { recommended, reason };
   } catch (err: any) {

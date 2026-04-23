@@ -35,7 +35,11 @@ function maybeRotate() {
   try {
     const s = statSync(LOG_FILE);
     if (s.size > MAX_LOG_SIZE) {
-      try { renameSync(LOG_FILE, LOG_OLD); } catch { /* ok */ }
+      try {
+        renameSync(LOG_FILE, LOG_OLD);
+      } catch {
+        /* ok */
+      }
     }
   } catch {
     // file doesn't exist yet
@@ -48,7 +52,7 @@ function ts(): string {
 
 export function log(...args: any[]) {
   ensureDirs();
-  const line = `[${ts()}] ${args.map(a => typeof a === "string" ? a : JSON.stringify(a)).join(" ")}\n`;
+  const line = `[${ts()}] ${args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ")}\n`;
   try {
     appendFileSync(LOG_FILE, line);
   } catch {

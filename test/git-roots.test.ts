@@ -6,7 +6,9 @@ import { findGitRoot, resolveGitRoots, resolveAllGitRoots } from "../git-roots";
  * Minimal mock of the parts of ExtensionAPI that git-roots uses.
  * Records every exec call and returns canned results.
  */
-function makeMockPi(execHandler: (cmd: string, args: string[]) => { code: number; stdout: string; stderr?: string }) {
+function makeMockPi(
+  execHandler: (cmd: string, args: string[]) => { code: number; stdout: string; stderr?: string },
+) {
   const calls: Array<{ cmd: string; args: string[] }> = [];
   const pi: any = {
     async exec(cmd: string, args: string[]) {
@@ -132,7 +134,8 @@ describe("resolveAllGitRoots", () => {
       return { code: 128, stdout: "" };
     });
     const result = await resolveAllGitRoots(
-      pi, "/cwd",
+      pi,
+      "/cwd",
       new Set(["/a/src/x.ts"]),
       ["/b/src/y.ts"],
       new Set(),
@@ -143,12 +146,7 @@ describe("resolveAllGitRoots", () => {
 
   it("resolveAllGitRoots_NoGitGroup_NotIncluded", async () => {
     const { pi } = makeMockPi(() => ({ code: 128, stdout: "" }));
-    const result = await resolveAllGitRoots(
-      pi, "/cwd",
-      new Set(["/tmp/x.ts"]),
-      [],
-      new Set(),
-    );
+    const result = await resolveAllGitRoots(pi, "/cwd", new Set(["/tmp/x.ts"]), [], new Set());
     expect(result.has("(no-git)")).toBe(false);
   });
 
@@ -161,7 +159,8 @@ describe("resolveAllGitRoots", () => {
   it("resolveAllGitRoots_Deduplicates", async () => {
     const { pi } = makeMockPi(() => ({ code: 0, stdout: "/repo" }));
     const result = await resolveAllGitRoots(
-      pi, "/cwd",
+      pi,
+      "/cwd",
       new Set(["/repo/a.ts"]),
       ["/repo/b.ts"],
       new Set(["/repo"]),

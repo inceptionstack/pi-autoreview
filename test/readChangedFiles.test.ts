@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { readChangedFiles } from "../context";
 
-function makeMockPi(execHandler: (cmd: string, args: string[]) => { code: number; stdout: string }) {
+function makeMockPi(
+  execHandler: (cmd: string, args: string[]) => { code: number; stdout: string },
+) {
   const pi: any = {
     async exec(cmd: string, args: string[]) {
       const r = execHandler(cmd, args);

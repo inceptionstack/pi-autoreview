@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { parseSettings, DEFAULT_SETTINGS, DEFAULT_TOGGLE_SHORTCUT, DEFAULT_CANCEL_SHORTCUT, VALID_THINKING_LEVELS, loadShortcutSettingsSync, configDirs, readConfigFile } from "../settings";
+import {
+  parseSettings,
+  DEFAULT_SETTINGS,
+  DEFAULT_TOGGLE_SHORTCUT,
+  DEFAULT_CANCEL_SHORTCUT,
+  VALID_THINKING_LEVELS,
+  loadShortcutSettingsSync,
+  configDirs,
+  readConfigFile,
+} from "../settings";
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir, homedir } from "node:os";

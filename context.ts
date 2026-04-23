@@ -62,10 +62,9 @@ export async function readChangedFiles(
     const fullPath = root ? `${root}/${file}` : file;
     opts?.onStatus?.(`reading ${fullPath}…`);
 
-    const readResult = await pi.exec(
-      "head", ["-c", String(MAX_FILE_SIZE + 100), fullPath],
-      { timeout: 5000 },
-    );
+    const readResult = await pi.exec("head", ["-c", String(MAX_FILE_SIZE + 100), fullPath], {
+      timeout: 5000,
+    });
 
     if (readResult.code !== 0 || !readResult.stdout) {
       sections.push(`### ${file}\n(could not read — file may be deleted)`);
@@ -77,8 +76,8 @@ export async function readChangedFiles(
     totalSize += content.length;
 
     if (content.length > MAX_FILE_SIZE) {
-      content = content.slice(0, MAX_FILE_SIZE) +
-        `\n\n... (truncated, ${content.length} total chars)`;
+      content =
+        content.slice(0, MAX_FILE_SIZE) + `\n\n... (truncated, ${content.length} total chars)`;
     }
 
     const newLabel = opts?.newFiles?.has(file) ? " (new file)" : "";
@@ -108,10 +107,9 @@ export async function buildReviewContext(
     changedResult.code === 0 ? changedResult.stdout.trim().split("\n").filter(Boolean) : [];
 
   // Include untracked (new) files
-  const untrackedResult = await pi.exec(
-    "git", ["ls-files", "--others", "--exclude-standard"],
-    { timeout: 5000 },
-  );
+  const untrackedResult = await pi.exec("git", ["ls-files", "--others", "--exclude-standard"], {
+    timeout: 5000,
+  });
   if (untrackedResult.code === 0 && untrackedResult.stdout.trim()) {
     const untracked = untrackedResult.stdout.trim().split("\n").filter(Boolean);
     const existing = new Set(changedFiles);
@@ -204,10 +202,12 @@ export interface ReviewContent {
   files: string[];
 }
 
-
 // ── Helper: format tool call summary section ────────
 
-function buildSummarySection(agentToolCalls: TrackedToolCall[]): { summarySection: string; changeSummary: string } {
+function buildSummarySection(agentToolCalls: TrackedToolCall[]): {
+  summarySection: string;
+  changeSummary: string;
+} {
   const changeSummary = buildChangeSummary(agentToolCalls);
   const summarySection = changeSummary.trim()
     ? `\n\n---\n\n## Agent tool calls (what was changed)\n\n${changeSummary}`
@@ -286,10 +286,14 @@ async function buildRepoContext(
     files = [...untracked];
   } else {
     // No uncommitted changes AND no untracked files — fall back to last commit
-    const lastResult = await pi.exec("git", ["-C", root, "diff", "HEAD~1", "HEAD"], { timeout: 15000 });
+    const lastResult = await pi.exec("git", ["-C", root, "diff", "HEAD~1", "HEAD"], {
+      timeout: 15000,
+    });
     if (lastResult.code === 0 && lastResult.stdout.trim()) {
       diff = lastResult.stdout.trim();
-      const logResult = await pi.exec("git", ["-C", root, "log", "--oneline", "-1"], { timeout: 5000 });
+      const logResult = await pi.exec("git", ["-C", root, "log", "--oneline", "-1"], {
+        timeout: 5000,
+      });
       commitLabel = ` (last commit: ${logResult.stdout.trim()})`;
       files = await listDiffFiles(pi, root, "HEAD~1", "HEAD");
     }
@@ -320,18 +324,25 @@ async function buildRepoContext(
     }
   }
 
-  log("path1: root=", root, "diff=", diff.length, "files=", filteredFiles, "fileSections=", fileSections.length);
+  log(
+    "path1: root=",
+    root,
+    "diff=",
+    diff.length,
+    "files=",
+    filteredFiles,
+    "fileSections=",
+    fileSections.length,
+  );
 
   // Get recent commit messages for context
-  const commitLogResult = await pi.exec("git", ["-C", root, "log", "--oneline", "-10"], { timeout: 5000 });
+  const commitLogResult = await pi.exec("git", ["-C", root, "log", "--oneline", "-10"], {
+    timeout: 5000,
+  });
   const commitLog = commitLogResult.code === 0 ? commitLogResult.stdout.trim() : "";
-  const commitSection = commitLog
-    ? `## Recent commits\n\`\`\`\n${commitLog}\n\`\`\`\n\n`
-    : "";
+  const commitSection = commitLog ? `## Recent commits\n\`\`\`\n${commitLog}\n\`\`\`\n\n` : "";
 
-  const fileList = filteredFiles
-    .map((f) => (untrackedFiles.has(f) ? `${f} (new)` : f))
-    .join(", ");
+  const fileList = filteredFiles.map((f) => (untrackedFiles.has(f) ? `${f} (new)` : f)).join(", ");
 
   const text =
     `## Repo: ${root}${commitLabel}\n\n` +
@@ -344,17 +355,22 @@ async function buildRepoContext(
 }
 
 /** List files changed in a git diff range. */
-async function listDiffFiles(pi: ExtensionAPI, root: string, ...range: string[]): Promise<string[]> {
-  const result = await pi.exec("git", ["-C", root, "diff", ...range, "--name-only"], { timeout: 5000 });
+async function listDiffFiles(
+  pi: ExtensionAPI,
+  root: string,
+  ...range: string[]
+): Promise<string[]> {
+  const result = await pi.exec("git", ["-C", root, "diff", ...range, "--name-only"], {
+    timeout: 5000,
+  });
   return result.code === 0 ? result.stdout.trim().split("\n").filter(Boolean) : [];
 }
 
 /** List untracked files in a git repo. */
 async function listUntrackedFiles(pi: ExtensionAPI, root: string): Promise<string[]> {
-  const result = await pi.exec(
-    "git", ["-C", root, "ls-files", "--others", "--exclude-standard"],
-    { timeout: 5000 },
-  );
+  const result = await pi.exec("git", ["-C", root, "ls-files", "--others", "--exclude-standard"], {
+    timeout: 5000,
+  });
   return result.code === 0 ? result.stdout.trim().split("\n").filter(Boolean) : [];
 }
 
@@ -393,14 +409,14 @@ export async function getContentFromLastCommit(
     const commitLog = (
       await pi.exec("git", ["log", "--oneline", "-10"], { timeout: 5000 })
     ).stdout.trim();
-    const nameResult = await pi.exec("git", ["diff", "HEAD~1", "HEAD", "--name-only"], { timeout: 5000 });
-    const files =
-      nameResult.code === 0 ? nameResult.stdout.trim().split("\n").filter(Boolean) : [];
+    const nameResult = await pi.exec("git", ["diff", "HEAD~1", "HEAD", "--name-only"], {
+      timeout: 5000,
+    });
+    const files = nameResult.code === 0 ? nameResult.stdout.trim().split("\n").filter(Boolean) : [];
 
     const { sections: fileSections } = await readChangedFiles(pi, files, { onStatus });
-    const fileSection = fileSections.length > 0
-      ? `\n\n## Full file contents\n\n${fileSections.join("\n\n")}`
-      : "";
+    const fileSection =
+      fileSections.length > 0 ? `\n\n## Full file contents\n\n${fileSections.join("\n\n")}` : "";
 
     log("path3: last commit, files=", files);
     return {
@@ -432,10 +448,9 @@ export async function getContentFromToolCalls(
 
     onStatus?.(`reading ${filePath}…`);
     try {
-      const result = await pi.exec(
-        "head", ["-c", String(MAX_NON_GIT_FILE_SIZE + 100), filePath],
-        { timeout: 5000 },
-      );
+      const result = await pi.exec("head", ["-c", String(MAX_NON_GIT_FILE_SIZE + 100), filePath], {
+        timeout: 5000,
+      });
       if (result.code !== 0 || !result.stdout) continue;
       if (result.stdout.includes("\0")) continue;
       if (result.stdout.length > MAX_NON_GIT_FILE_SIZE) continue;
@@ -443,7 +458,8 @@ export async function getContentFromToolCalls(
       reviewedFiles.push(filePath);
       const fileContent =
         result.stdout.length > 10000
-          ? result.stdout.slice(0, 10000) + `\n\n... (truncated, ${result.stdout.length} total chars)`
+          ? result.stdout.slice(0, 10000) +
+            `\n\n... (truncated, ${result.stdout.length} total chars)`
           : result.stdout;
       parts.push(`### ${filePath}\n\`\`\`\n${fileContent}\n\`\`\``);
     } catch {
@@ -476,12 +492,23 @@ export async function getBestReviewContent(
   ignorePatterns?: string[],
   gitRoots?: Set<string>,
 ): Promise<ReviewContent | null> {
-  log("getBestReviewContent: gitRoots=", gitRoots ? [...gitRoots] : "none", "toolCalls=", agentToolCalls.length);
+  log(
+    "getBestReviewContent: gitRoots=",
+    gitRoots ? [...gitRoots] : "none",
+    "toolCalls=",
+    agentToolCalls.length,
+  );
 
   const { summarySection, changeSummary } = buildSummarySection(agentToolCalls);
 
   if (gitRoots && gitRoots.size > 0) {
-    const result = await getContentFromGitRoots(pi, gitRoots, ignorePatterns, summarySection, onStatus);
+    const result = await getContentFromGitRoots(
+      pi,
+      gitRoots,
+      ignorePatterns,
+      summarySection,
+      onStatus,
+    );
     if (result) return result;
   }
 
