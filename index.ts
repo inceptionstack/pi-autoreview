@@ -259,7 +259,26 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
-    const changeSummary = buildChangeSummary(agentToolCalls);
+    // Use actual git diff for review — much more useful than truncated tool call summaries
+    let changeSummary: string;
+    try {
+      const diffResult = await pi.exec("git", ["diff", "HEAD"], { timeout: 15000 });
+      const stagedDiff = await pi.exec("git", ["diff", "--cached"], { timeout: 15000 });
+      const combinedDiff = [diffResult.stdout.trim(), stagedDiff.stdout.trim()]
+        .filter(Boolean)
+        .join("\n");
+
+      if (combinedDiff) {
+        changeSummary = truncateDiff(combinedDiff, 30000);
+      } else {
+        // Changes already committed — fall back to tool call summaries
+        changeSummary = buildChangeSummary(agentToolCalls);
+      }
+    } catch {
+      // Not a git repo or git failed
+      changeSummary = buildChangeSummary(agentToolCalls);
+    }
+
     if (!changeSummary.trim()) {
       resetTrackingState(ctx);
       return;
@@ -271,7 +290,7 @@ export default function (pi: ExtensionAPI) {
     updateStatus(ctx);
 
     try {
-      const prompt = `${buildReviewPrompt()}\n\n---\n\nHere are the changes made:\n\n${changeSummary}`;
+      const prompt = `${buildReviewPrompt()}\n\n---\n\nHere are the changes made:\n\n\`\`\`diff\n${changeSummary}\n\`\`\``;
       const result = await runReviewSession(prompt, { signal: reviewAbort.signal, cwd: ctx.cwd });
 
       if (result.isLgtm) reviewLoopCount = 0;
