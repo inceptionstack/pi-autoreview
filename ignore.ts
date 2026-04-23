@@ -21,9 +21,14 @@ import { readConfigFile } from "./settings";
  * Tries cwd/.autoreview/ first, then ~/.pi/.autoreview/.
  */
 export async function loadIgnorePatterns(cwd: string): Promise<string[] | null> {
-  const content = await readConfigFile(cwd, "ignore");
-  if (content === null) return null;
-  return parseIgnoreFile(content);
+  try {
+    const content = await readConfigFile(cwd, "ignore");
+    if (content === null) return null;
+    return parseIgnoreFile(content);
+  } catch (err: any) {
+    log(`Warning: could not read .autoreview/ignore: ${err?.message}`);
+    return null;
+  }
 }
 
 /**
