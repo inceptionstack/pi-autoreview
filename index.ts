@@ -458,10 +458,147 @@ export default function (pi: ExtensionAPI) {
   // ── /review command ────────────────────────────────
 
   pi.registerCommand("review", {
-    description: "Toggle automatic code review",
-    handler: async (_args, ctx) => {
+    description: "Toggle auto-review, or '/review <N>' to review last N commits",
+    handler: async (args, ctx) => {
+      const trimmed = (args ?? "").trim();
+
+      // If a number is passed, review last N commits
+      if (trimmed && /^\d+$/.test(trimmed)) {
+        const count = parseInt(trimmed, 10);
+        if (count <= 0) {
+          ctx.ui.notify("Usage: /review <N> where N > 0", "warning");
+          return;
+        }
+
+        ctx.ui.notify(`Reviewing last ${count} commit${count > 1 ? "s" : ""}…`, "info");
+        isReviewing = true;
+        reviewAbort = new AbortController();
+        updateStatus(ctx);
+
+        try {
+          // Get the diff for the last N commits
+          const diffResult = await pi.exec("git", ["diff", `HEAD~${count}`, "HEAD"], {
+            timeout: 15000,
+          });
+
+          if (diffResult.code !== 0) {
+            ctx.ui.notify(
+              `git diff failed (exit ${diffResult.code}): ${diffResult.stderr.slice(0, 200)}`,
+              "error",
+            );
+            return;
+          }
+
+          const diff = diffResult.stdout.trim();
+          if (!diff) {
+            ctx.ui.notify("No changes found in the last " + count + " commit(s).", "info");
+            return;
+          }
+
+          // Get commit messages for context
+          const logResult = await pi.exec("git", ["log", `--oneline`, `-${count}`], {
+            timeout: 5000,
+          });
+          const commitLog = logResult.stdout.trim();
+
+          // Truncate diff if too large
+          const maxDiffLen = 30000;
+          const truncatedDiff =
+            diff.length > maxDiffLen
+              ? diff.slice(0, maxDiffLen) +
+                `\n\n... (diff truncated, ${diff.length - maxDiffLen} chars omitted)`
+              : diff;
+
+          const reviewPrompt = buildReviewPrompt();
+          const prompt = `${reviewPrompt}\n\n---\n\nReview the following git diff (last ${count} commit${count > 1 ? "s" : ""}):\n\nCommits:\n${commitLog}\n\nDiff:\n\`\`\`diff\n${truncatedDiff}\n\`\`\``;
+
+          const authStorage = AuthStorage.create();
+          const modelRegistry = ModelRegistry.create(authStorage);
+
+          const { session: reviewSession } = await createAgentSession({
+            cwd: ctx.cwd,
+            sessionManager: SessionManager.inMemory(),
+            authStorage,
+            modelRegistry,
+          });
+
+          let reviewText = "";
+          const unsub = reviewSession.subscribe((ev) => {
+            if (ev.type === "message_update" && ev.assistantMessageEvent.type === "text_delta") {
+              reviewText += ev.assistantMessageEvent.delta;
+            }
+          });
+
+          try {
+            const signal = reviewAbort!.signal;
+            await new Promise<void>((resolve, reject) => {
+              let settled = false;
+              const onAbort = () => {
+                if (settled) return;
+                settled = true;
+                reviewSession.abort();
+                reject(new Error("Review cancelled"));
+              };
+              if (signal.aborted) {
+                onAbort();
+                return;
+              }
+              signal.addEventListener("abort", onAbort, { once: true });
+              reviewSession.prompt(prompt).then(
+                () => {
+                  settled = true;
+                  signal.removeEventListener("abort", onAbort);
+                  resolve();
+                },
+                (err) => {
+                  settled = true;
+                  signal.removeEventListener("abort", onAbort);
+                  reject(err);
+                },
+              );
+            });
+          } finally {
+            unsub();
+            reviewSession.dispose();
+          }
+
+          if (!reviewText.trim() || reviewText.includes("LGTM")) {
+            pi.sendMessage(
+              {
+                customType: "code-review",
+                content: `\u2705 **Code Review** (last ${count} commit${count > 1 ? "s" : ""})\n\nReview found no issues. Looks good!`,
+                display: true,
+              },
+              { triggerTurn: false, deliverAs: "followUp" },
+            );
+          } else {
+            pi.sendMessage(
+              {
+                customType: "code-review",
+                content: `\ud83d\udd0d **Code Review** (last ${count} commit${count > 1 ? "s" : ""})\n\n${reviewText}\n\nPlease review these findings and fix any valid issues.\n\n\u26a0\ufe0f **Do NOT push to remote yet.** Fix any issues first. Do NOT push after fixing either \u2014 a new review cycle will check your fixes automatically.`,
+                display: true,
+              },
+              { triggerTurn: true, deliverAs: "followUp" },
+            );
+          }
+        } catch (err: any) {
+          if (err?.message === "Review cancelled") {
+            ctx.ui.notify("Review cancelled", "info");
+          } else {
+            console.error("[auto-review] commit review failed:", err);
+            ctx.ui.notify(`Review failed: ${err?.message ?? err}`, "error");
+          }
+        } finally {
+          isReviewing = false;
+          reviewAbort = null;
+          updateStatus(ctx);
+        }
+        return;
+      }
+
+      // No args: toggle auto-review
       reviewEnabled = !reviewEnabled;
-      if (reviewEnabled) reviewLoopCount = 0; // Reset loop counter on re-enable
+      if (reviewEnabled) reviewLoopCount = 0;
       ctx.ui.notify(`Auto-review: ${reviewEnabled ? "on" : "off"}`, "info");
       updateStatus(ctx);
     },
