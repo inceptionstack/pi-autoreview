@@ -33,10 +33,19 @@ import {
   isFileModifyingTool,
   buildChangeSummary,
 } from "./changes";
+import { buildReviewContext, formatReviewContext } from "./context";
 
 // ── Default review prompt ────────────────────────────
 
-const DEFAULT_REVIEW_PROMPT = `You are a senior code reviewer. You will be given a description of changes that were just made to a codebase. Review them for the following:
+const DEFAULT_REVIEW_PROMPT = `You are a senior code reviewer. You will be given:
+- A list of changed files
+- Full contents of each changed file
+- The git diff of the changes
+- The project file tree
+
+You also have tools available (read, bash, find, grep, ls) to explore the codebase further. Use them if you need more context — for example to check if tests exist for a module, to read related files, or to understand how a function is used elsewhere. Do NOT use write or edit tools — you are reviewing only, not modifying.
+
+Review the changes for the following:
 
 ## Correctness
 - Bugs, logic errors, off-by-one errors
@@ -53,7 +62,7 @@ const DEFAULT_REVIEW_PROMPT = `You are a senior code reviewer. You will be given
 - Readability and maintainability — unclear naming, overly complex logic
 
 ## Testing
-- Are there tests for the new functionality added?
+- Are there tests for the new functionality added? Check the test directory.
 - Test quality: follow Roy Osherove's "Art of Unit Testing" (3rd edition) conventions:
   - Naming: UnitOfWork_StateUnderTest_ExpectedBehavior (or similar descriptive pattern)
   - Each test should have clear entry points (triggers) and exit points (return values, state changes, or collaborator calls)
@@ -172,7 +181,7 @@ export default function (pi: ExtensionAPI) {
     updateStatus(ctx);
   }
 
-  function updateStatus(ctx: { ui: any; hasUI?: boolean }) {
+  function updateStatus(ctx: { ui: any; hasUI?: boolean }, activity?: string) {
     if (!ctx.hasUI || !ctx.ui) return;
     const theme = ctx.ui.theme;
     const label = theme.fg("accent", "auto-review");
@@ -180,9 +189,10 @@ export default function (pi: ExtensionAPI) {
 
     if (isReviewing) {
       const loopInfo = theme.fg("dim", `[${reviewLoopCount}/${settings.maxReviewLoops}]`);
+      const activityInfo = activity ? ` ${theme.fg("muted", activity)}` : "";
       ctx.ui.setStatus(
         "code-review",
-        `${label} ${theme.fg("warning", "reviewing…")} ${loopInfo} ${theme.fg("dim", "(Ctrl+Shift+R to cancel)")}`,
+        `${label} ${theme.fg("warning", "reviewing…")} ${loopInfo}${activityInfo} ${theme.fg("dim", "(Ctrl+Shift+R to cancel)")}`,
       );
       return;
     }
@@ -259,36 +269,35 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
-    // Use actual git diff for review — much more useful than truncated tool call summaries
-    let changeSummary: string;
-    try {
-      // git diff HEAD covers both staged and unstaged changes vs last commit
-      const diffResult = await pi.exec("git", ["diff", "HEAD"], { timeout: 15000 });
-
-      if (diffResult.code === 0 && diffResult.stdout.trim()) {
-        changeSummary = truncateDiff(diffResult.stdout.trim(), 30000);
-      } else {
-        // Changes already committed or git diff empty — fall back to tool call summaries
-        changeSummary = buildChangeSummary(agentToolCalls);
-      }
-    } catch {
-      // Not a git repo or git failed
-      changeSummary = buildChangeSummary(agentToolCalls);
-    }
-
-    if (!changeSummary.trim()) {
-      resetTrackingState(ctx);
-      return;
-    }
-
     reviewLoopCount++;
     isReviewing = true;
     reviewAbort = new AbortController();
     updateStatus(ctx);
 
     try {
-      const prompt = `${buildReviewPrompt()}\n\n---\n\nHere are the changes made:\n\n\`\`\`diff\n${changeSummary}\n\`\`\``;
-      const result = await runReviewSession(prompt, { signal: reviewAbort.signal, cwd: ctx.cwd });
+      // Build rich context: file tree, changed files, full contents, diff
+      const reviewContext = await buildReviewContext(pi, (msg) => updateStatus(ctx, msg));
+
+      let contextSection: string;
+      if (reviewContext) {
+        contextSection = formatReviewContext(reviewContext);
+      } else {
+        // No git diff available — fall back to tool call summaries
+        const fallback = buildChangeSummary(agentToolCalls);
+        if (!fallback.trim()) {
+          resetTrackingState(ctx);
+          return;
+        }
+        contextSection = fallback;
+      }
+
+      updateStatus(ctx, "analyzing…");
+      const prompt = `${buildReviewPrompt()}\n\n---\n\n${contextSection}`;
+      const result = await runReviewSession(prompt, {
+        signal: reviewAbort.signal,
+        cwd: ctx.cwd,
+        onActivity: (desc) => updateStatus(ctx, desc),
+      });
 
       if (result.isLgtm) reviewLoopCount = 0;
       sendReviewResult(pi, result, "", {

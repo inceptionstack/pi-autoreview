@@ -1,8 +1,13 @@
 /**
- * reviewer.ts — Shared review session logic
+ * reviewer.ts — Review session with full context
  *
- * Extracts the duplicated reviewer session creation, abort handling,
- * and result message sending into reusable functions.
+ * The reviewer gets:
+ * - Full git diff
+ * - List of changed files
+ * - Full contents of each changed file
+ * - Project file tree
+ * - Read-only tools to explore the codebase further
+ * - Live status updates shown in the main pi status bar
  */
 
 import {
@@ -11,6 +16,7 @@ import {
   SessionManager,
   AuthStorage,
   ModelRegistry,
+  type AgentSessionEvent,
 } from "@mariozechner/pi-coding-agent";
 
 export interface ReviewResult {
@@ -21,11 +27,14 @@ export interface ReviewResult {
 export interface ReviewOptions {
   signal: AbortSignal;
   cwd: string;
+  /** Called when the reviewer uses tools — for status bar updates */
+  onActivity?: (description: string) => void;
 }
 
 /**
- * Spawn a fresh pi reviewer instance, send a prompt, collect the response.
- * Handles abort via signal. Returns the review text and whether it's LGTM.
+ * Spawn a fresh pi reviewer instance with tools, send a prompt,
+ * collect the response. The reviewer can read files and explore
+ * the codebase as needed.
  */
 export async function runReviewSession(prompt: string, opts: ReviewOptions): Promise<ReviewResult> {
   const authStorage = AuthStorage.create();
@@ -36,12 +45,34 @@ export async function runReviewSession(prompt: string, opts: ReviewOptions): Pro
     sessionManager: SessionManager.inMemory(),
     authStorage,
     modelRegistry,
+    // Default tools include read, bash, edit, write — reviewer gets all
+    // but we instruct it to only read, not modify
   });
 
   let reviewText = "";
-  const unsub = session.subscribe((ev) => {
+  const unsub = session.subscribe((ev: AgentSessionEvent) => {
     if (ev.type === "message_update" && ev.assistantMessageEvent.type === "text_delta") {
       reviewText += ev.assistantMessageEvent.delta;
+    }
+
+    // Report tool activity for status bar
+    if (opts.onActivity) {
+      if (ev.type === "tool_execution_start") {
+        const name = ev.toolName;
+        const args = ev.args as any;
+        if (name === "read") {
+          opts.onActivity(`reading ${args?.path ?? "file"}`);
+        } else if (name === "bash") {
+          opts.onActivity(`running: ${(args?.command ?? "").slice(0, 50)}`);
+        } else if (name === "find" || name === "grep" || name === "ls") {
+          opts.onActivity(`${name} ${(args?.path ?? args?.pattern ?? "").slice(0, 40)}`);
+        } else {
+          opts.onActivity(`${name}…`);
+        }
+      }
+      if (ev.type === "tool_execution_end") {
+        opts.onActivity("analyzing…");
+      }
     }
   });
 
