@@ -31,6 +31,7 @@ import { type TrackedToolCall, hasFileChanges, isFileModifyingTool } from "./cha
 import { getBestReviewContent } from "./context";
 import { loadIgnorePatterns } from "./ignore";
 import { loadRoundupRules, runRoundupReview } from "./roundup";
+import { findGitRoot, resolveGitRoots } from "./git-roots";
 
 const MAX_TRACKED_FILES = 1000;
 
@@ -188,6 +189,7 @@ export default function (pi: ExtensionAPI) {
 
   let agentToolCalls: TrackedToolCall[] = [];
   const modifiedFiles = new Set<string>();
+  const detectedGitRoots = new Set<string>(); // git repos discovered from file paths or bash git commands
   const pendingArgs = new Map<string, { name: string; input: any }>();
 
   // ── Helpers ────────────────────────────────────────
@@ -203,6 +205,7 @@ export default function (pi: ExtensionAPI) {
   function resetTrackingState(ctx: { ui: any; hasUI?: boolean }) {
     agentToolCalls = [];
     modifiedFiles.clear();
+    detectedGitRoots.clear();
     pendingArgs.clear();
     fileCapWarned = false;
     updateStatus(ctx);
@@ -273,11 +276,19 @@ export default function (pi: ExtensionAPI) {
             reviewAbort = new AbortController();
             updateStatus(ctx);
             try {
+              // Resolve git roots from tracked files + detected bash git commands
+              const allRoots = new Set(detectedGitRoots);
+              const fileRoots = await resolveGitRoots(pi, ctx.cwd, modifiedFiles);
+              for (const root of fileRoots.keys()) {
+                if (root !== "(no-git)") allRoots.add(root);
+              }
+
               const best = await getBestReviewContent(
                 pi,
                 agentToolCalls,
                 (msg) => updateStatus(ctx, msg),
                 ignorePatterns ?? undefined,
+                allRoots,
               );
               if (best) {
                 updateStatus(ctx, "analyzing…");
@@ -336,6 +347,23 @@ export default function (pi: ExtensionAPI) {
       }
       updateStatus(ctx);
     }
+
+    // Detect git repo roots from bash git commands
+    if (event.toolName === "bash") {
+      const cmd = event.args?.command ?? "";
+      if (/\bgit\b/.test(cmd)) {
+        // Extract -C <dir> if present
+        const cFlag = cmd.match(/git\s+-C\s+(\S+)/);
+        if (cFlag) {
+          const root = await findGitRoot(pi, cFlag[1]);
+          if (root) detectedGitRoots.add(root);
+        } else {
+          // Try cwd
+          const root = await findGitRoot(pi, ctx.cwd);
+          if (root) detectedGitRoots.add(root);
+        }
+      }
+    }
   });
 
   pi.on("tool_execution_end", async (event) => {
@@ -391,11 +419,19 @@ export default function (pi: ExtensionAPI) {
     updateStatus(ctx);
 
     try {
+      // Resolve git roots from tracked files + detected bash git commands
+      const allRoots = new Set(detectedGitRoots);
+      const fileRoots = await resolveGitRoots(pi, ctx.cwd, modifiedFiles);
+      for (const root of fileRoots.keys()) {
+        if (root !== "(no-git)") allRoots.add(root);
+      }
+
       const best = await getBestReviewContent(
         pi,
         agentToolCalls,
         (msg) => updateStatus(ctx, msg),
         ignorePatterns ?? undefined,
+        allRoots,
       );
 
       if (!best) {

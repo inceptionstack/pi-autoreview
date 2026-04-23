@@ -153,7 +153,7 @@ export function formatReviewContext(ctx: ReviewContext): string {
 
 /**
  * Get the best available review content.
- * Tries: git diff HEAD → git diff HEAD~1 → tool call summaries.
+ * Tries: git diff from detected repos → git diff from cwd → tool call summaries.
  * Returns the context string for the reviewer prompt, or null if nothing to review.
  */
 export async function getBestReviewContent(
@@ -161,14 +161,53 @@ export async function getBestReviewContent(
   agentToolCalls: TrackedToolCall[],
   onStatus?: (msg: string) => void,
   ignorePatterns?: string[],
+  gitRoots?: Set<string>,
 ): Promise<{ content: string; label: string } | null> {
-  // 1. Try uncommitted changes (git diff HEAD)
+  // 1. Try each known git root for uncommitted changes
+  if (gitRoots && gitRoots.size > 0) {
+    const allContexts: string[] = [];
+    for (const root of gitRoots) {
+      onStatus?.(`checking ${root}…`);
+      const result = await pi.exec("git", ["-C", root, "diff", "HEAD"], { timeout: 15000 });
+      if (result.code === 0 && result.stdout.trim()) {
+        const diff = truncateDiff(result.stdout.trim(), 15000);
+        const nameResult = await pi.exec("git", ["-C", root, "diff", "HEAD", "--name-only"], {
+          timeout: 5000,
+        });
+        const files =
+          nameResult.code === 0 ? nameResult.stdout.trim().split("\n").filter(Boolean) : [];
+        const filteredFiles = ignorePatterns ? filterIgnored(files, ignorePatterns) : files;
+        allContexts.push(
+          `## Repo: ${root}\n\nChanged files: ${filteredFiles.join(", ")}\n\n\`\`\`diff\n${diff}\n\`\`\``,
+        );
+      } else {
+        // Try last commit in this repo
+        const lastResult = await pi.exec("git", ["-C", root, "diff", "HEAD~1", "HEAD"], {
+          timeout: 15000,
+        });
+        if (lastResult.code === 0 && lastResult.stdout.trim()) {
+          const diff = truncateDiff(lastResult.stdout.trim(), 15000);
+          const logResult = await pi.exec("git", ["-C", root, "log", "--oneline", "-1"], {
+            timeout: 5000,
+          });
+          allContexts.push(
+            `## Repo: ${root} (last commit: ${logResult.stdout.trim()})\n\n\`\`\`diff\n${diff}\n\`\`\``,
+          );
+        }
+      }
+    }
+    if (allContexts.length > 0) {
+      return { content: allContexts.join("\n\n---\n\n"), label: `${allContexts.length} repo(s)` };
+    }
+  }
+
+  // 2. Fallback: try cwd as git repo (original behavior)
   const reviewContext = await buildReviewContext(pi, onStatus, ignorePatterns);
   if (reviewContext) {
     return { content: formatReviewContext(reviewContext), label: "" };
   }
 
-  // 2. Try last commit (git diff HEAD~1 HEAD)
+  // 3. Try last commit from cwd
   onStatus?.("checking last commit…");
   try {
     const lastCommitDiff = await pi.exec("git", ["diff", "HEAD~1", "HEAD"], { timeout: 15000 });
@@ -182,11 +221,9 @@ export async function getBestReviewContent(
         label: "last commit",
       };
     }
-  } catch {
-    // git not available — fall through
-  }
+  } catch { /* git not available */ }
 
-  // 3. Fall back to tool call summaries (no git)
+  // 4. Fall back to tool call summaries (no git)
   if (agentToolCalls.length > 0) {
     const summary = buildChangeSummary(agentToolCalls);
     if (summary.trim()) {
