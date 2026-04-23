@@ -440,6 +440,9 @@ export default function (pi: ExtensionAPI) {
       }
 
       updateStatus(ctx, "analyzing…");
+      console.log(
+        `[auto-review] Reviewing ${best.files.length} files via ${best.label || "git diff"}: ${best.files.join(", ")}`,
+      );
       const prompt = `${buildReviewPrompt()}\n\n---\n\n${best.content}`;
       const result = await runReviewSession(prompt, {
         signal: reviewAbort.signal,

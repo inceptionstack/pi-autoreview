@@ -24,6 +24,7 @@ import {
 export interface ReviewResult {
   text: string;
   isLgtm: boolean;
+  durationMs: number;
 }
 
 export interface ReviewOptions {
@@ -41,6 +42,7 @@ export interface ReviewOptions {
  * the codebase as needed.
  */
 export async function runReviewSession(prompt: string, opts: ReviewOptions): Promise<ReviewResult> {
+  const startTime = Date.now();
   const authStorage = AuthStorage.create();
   const modelRegistry = ModelRegistry.create(authStorage);
 
@@ -136,7 +138,14 @@ export async function runReviewSession(prompt: string, opts: ReviewOptions): Pro
   }
 
   const isLgtm = !reviewText.trim() || reviewText.includes("LGTM");
-  return { text: reviewText, isLgtm };
+  const durationMs = Date.now() - startTime;
+  console.log(
+    `[auto-review] Review completed in ${(durationMs / 1000).toFixed(1)}s | ` +
+      `prompt: ${(prompt.length / 1000).toFixed(1)}k chars | ` +
+      `response: ${reviewText.length} chars | ` +
+      `lgtm: ${isLgtm}`,
+  );
+  return { text: reviewText, isLgtm, durationMs };
 }
 
 /**
@@ -157,8 +166,9 @@ export function sendReviewResult(
   label: string,
   opts?: { showLoopCount?: string; reviewedFiles?: string[] },
 ): void {
+  const duration = `${(result.durationMs / 1000).toFixed(1)}s`;
   if (result.isLgtm) {
-    console.log("[auto-review] Reviewer says: LGTM");
+    console.log(`[auto-review] Reviewer says: LGTM (${duration})`);
     const fileList =
       opts?.reviewedFiles && opts.reviewedFiles.length > 0
         ? `\n\n**Reviewed files:**\n\`\`\`\n${formatFileTree(opts.reviewedFiles)}\n\`\`\``
@@ -166,18 +176,22 @@ export function sendReviewResult(
     pi.sendMessage(
       {
         customType: "code-review",
-        content: `✅ **Automated Code Review**${label ? ` (${label})` : ""}\n\nReview found no issues. Looks good!${fileList}\n\nIf you were waiting to push until after reviews were done — all reviews are done, no issues found. Safe to push.`,
+        content: `✅ **Automated Code Review**${label ? ` (${label})` : ""} — ${duration}\n\nReview found no issues. Looks good!${fileList}\n\nIf you were waiting to push until after reviews were done — all reviews are done, no issues found. Safe to push.`,
         display: true,
       },
       { triggerTurn: true, deliverAs: "followUp" },
     );
   } else {
-    console.log("[auto-review] Reviewer found issues, feeding back...");
+    console.log(`[auto-review] Reviewer found issues (${duration}), feeding back...`);
     const loopInfo = opts?.showLoopCount ? ` (${opts.showLoopCount})` : "";
+    const fileList =
+      opts?.reviewedFiles && opts.reviewedFiles.length > 0
+        ? `\n\n**Reviewed files:**\n\`\`\`\n${formatFileTree(opts.reviewedFiles)}\n\`\`\``
+        : "";
     pi.sendMessage(
       {
         customType: "code-review",
-        content: `🔍 **Automated Code Review**${loopInfo || (label ? ` (${label})` : "")}\n\nA separate reviewer examined your recent changes and found potential issues:\n\n${result.text}\n\nPlease review these findings. If any are valid, fix them. If they're false positives, briefly explain why and move on.\n\n⚠️ **Do NOT push to remote yet.** Fix any issues first. Do NOT push after fixing either — a new review cycle will check your fixes automatically.`,
+        content: `🔍 **Automated Code Review**${loopInfo || (label ? ` (${label})` : "")} — ${duration}\n\nA separate reviewer examined your recent changes and found potential issues:\n\n${result.text}${fileList}\n\nPlease review these findings. If any are valid, fix them. If they're false positives, briefly explain why and move on.\n\n⚠️ **Do NOT push to remote yet.** Fix any issues first. Do NOT push after fixing either — a new review cycle will check your fixes automatically.`,
         display: true,
       },
       { triggerTurn: true, deliverAs: "followUp" },
