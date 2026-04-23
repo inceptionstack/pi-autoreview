@@ -21,6 +21,7 @@
  */
 
 import { readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
@@ -34,6 +35,9 @@ import { loadRoundupRules, runRoundupReview } from "./roundup";
 import { findGitRoot, resolveGitRoots } from "./git-roots";
 
 const MAX_TRACKED_FILES = 1000;
+
+/** Minimum content length to trigger a review (avoids reviewing trivial/empty diffs) */
+const MIN_REVIEW_CONTENT_LENGTH = 50;
 
 // ── Default review prompt ────────────────────────────
 
@@ -477,14 +481,14 @@ export default function (pi: ExtensionAPI) {
         allRoots,
       );
 
-      if (!best || best.content.trim().length < 50) {
+      if (!best || best.content.trim().length < MIN_REVIEW_CONTENT_LENGTH) {
         // No meaningful changes to review, or content too small
         resetTrackingState(ctx);
         return;
       }
 
       // Skip if we've already reviewed this exact content
-      const contentHash = best.content.length.toString() + ":" + best.content.slice(0, 100);
+      const contentHash = createHash("sha256").update(best.content).digest("hex");
       if (contentHash === lastReviewedContentHash) {
         console.log("[auto-review] Skipping — same content as last review");
         resetTrackingState(ctx);
@@ -495,7 +499,6 @@ export default function (pi: ExtensionAPI) {
       console.log(
         `[auto-review] Reviewing ${best.files.length} files via ${best.label || "git diff"}: ${best.files.join(", ")}`,
       );
-      lastReviewedContentHash = contentHash;
       const prompt = `${buildReviewPrompt()}\n\n---\n\n${best.content}`;
       const result = await runReviewSession(prompt, {
         signal: reviewAbort.signal,
@@ -506,6 +509,9 @@ export default function (pi: ExtensionAPI) {
 
       // Track change summary for roundup
       sessionChangeSummaries.push(best.content.slice(0, 5000));
+
+      // Mark content as reviewed (only after successful completion)
+      lastReviewedContentHash = contentHash;
 
       if (result.isLgtm) {
         lastReviewHadIssues = false;
