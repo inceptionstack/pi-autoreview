@@ -262,16 +262,13 @@ export default function (pi: ExtensionAPI) {
     // Use actual git diff for review — much more useful than truncated tool call summaries
     let changeSummary: string;
     try {
+      // git diff HEAD covers both staged and unstaged changes vs last commit
       const diffResult = await pi.exec("git", ["diff", "HEAD"], { timeout: 15000 });
-      const stagedDiff = await pi.exec("git", ["diff", "--cached"], { timeout: 15000 });
-      const combinedDiff = [diffResult.stdout.trim(), stagedDiff.stdout.trim()]
-        .filter(Boolean)
-        .join("\n");
 
-      if (combinedDiff) {
-        changeSummary = truncateDiff(combinedDiff, 30000);
+      if (diffResult.code === 0 && diffResult.stdout.trim()) {
+        changeSummary = truncateDiff(diffResult.stdout.trim(), 30000);
       } else {
-        // Changes already committed — fall back to tool call summaries
+        // Changes already committed or git diff empty — fall back to tool call summaries
         changeSummary = buildChangeSummary(agentToolCalls);
       }
     } catch {
