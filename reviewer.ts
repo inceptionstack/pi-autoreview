@@ -52,6 +52,12 @@ export async function runReviewSession(prompt: string, opts: ReviewOptions): Pro
 
   let reviewText = "";
   const unsub = session.subscribe((ev: AgentSessionEvent) => {
+    // Only capture text from assistant messages.
+    // Reset on each new assistant message so we only keep the final one —
+    // intermediate messages contain tool-call reasoning noise.
+    if (ev.type === "message_start" && (ev.message as any)?.role === "assistant") {
+      reviewText = "";
+    }
     if (ev.type === "message_update" && ev.assistantMessageEvent.type === "text_delta") {
       reviewText += ev.assistantMessageEvent.delta;
     }
