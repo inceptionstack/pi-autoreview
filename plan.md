@@ -22,8 +22,10 @@
 - The shortcut handler may not be dispatched while pi is streaming an assistant message from the previous turn (TUI input layer blocked).
 - OR: `session.abort()` inside `onAbort` isn't actually stopping the LLM stream — needs investigation into pi-coding-agent SDK abort propagation.
 - OR: The outer `opts.signal` ties to the main agent's abort, not the review's own lifecycle. Need a dedicated review AbortController that can be fired independently of the outer pi signal.
+- **Most likely (confirmed):** iTerm2 on macOS doesn't send Ctrl+Alt+letter combos — the keypress never reaches pi at all. The shortcut handler never fires (no log entry).
+**Fix:** Added `/cancel-review` slash command and `Alt+X` shortcut as terminal-independent alternatives. Slash commands work regardless of terminal key mapping or focus state. `Alt+X` works in iTerm2 with Option-as-Meta enabled.
 **Priority:** HIGH — users can't escape a stuck review except Ctrl+Alt+Shift+R full reset.
-**Status:** [ ]
+**Status:** [x] Fixed — `/cancel-review` command added
 
 ## Critical Bugs
 

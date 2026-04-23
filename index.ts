@@ -12,7 +12,8 @@
  * UX:
  *   - Status bar shows auto-review on/off + pending file count
  *   - Alt+R toggles review on/off
- *   - Ctrl+Alt+R cancels an in-progress review
+ *   - Alt+X or /cancel-review cancels an in-progress review
+ *   - Ctrl+Alt+R also cancels (terminals that support it)
  *   - /review command toggles, /review <N> reviews last N commits
  *
  * Install:
@@ -146,7 +147,7 @@ export default function (pi: ExtensionAPI) {
       const activityInfo = displayActivity ? ` ${theme.fg("muted", displayActivity)}` : "";
       ctx.ui.setStatus(
         "code-review",
-        `${label} ${theme.fg("warning", "reviewing…")} ${loopInfo} ${modelInfo}${activityInfo} ${theme.fg("dim", "(Ctrl+Alt+R to cancel)")}`,
+        `${label} ${theme.fg("warning", "reviewing…")} ${loopInfo} ${modelInfo}${activityInfo} ${theme.fg("dim", "(Alt+X or /cancel-review)")}`,
       );
       return;
     }
@@ -506,6 +507,17 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
+  pi.registerShortcut("alt+x", {
+    description: "Cancel in-progress code review (iTerm2/macOS friendly)",
+    handler: async (ctx) => {
+      if (isReviewing && reviewAbort) {
+        log("Cancel requested via Alt+X");
+        reviewAbort.abort();
+        if (ctx.hasUI) ctx.ui.notify("Auto-review cancelled", "info");
+      }
+    },
+  });
+
   pi.registerShortcut("ctrl+alt+shift+r", {
     description: "Full reset: cancel review, reset loop count, clear tracked files",
     handler: async (ctx) => {
@@ -530,6 +542,21 @@ export default function (pi: ExtensionAPI) {
   pi.registerShortcut("alt+r", {
     description: "Toggle automatic code review",
     handler: async (ctx) => toggleReview(ctx),
+  });
+
+  // ── /cancel-review command ─────────────────────────
+
+  pi.registerCommand("cancel-review", {
+    description: "Cancel an in-progress code review",
+    handler: async (_args, ctx) => {
+      if (isReviewing && reviewAbort) {
+        log("Cancel requested via /cancel-review");
+        reviewAbort.abort();
+        if (ctx.hasUI) ctx.ui.notify("Auto-review cancelled", "info");
+      } else {
+        if (ctx.hasUI) ctx.ui.notify("No review in progress", "info");
+      }
+    },
   });
 
   // ── /review command ────────────────────────────────
