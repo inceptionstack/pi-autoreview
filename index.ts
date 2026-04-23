@@ -177,6 +177,7 @@ export default function (pi: ExtensionAPI) {
   let reviewEnabled = true;
   let reviewAbort: AbortController | null = null;
   let isReviewing = false;
+  let lastReviewHadIssues = false;
   let reviewLoopCount = 0;
   let peakReviewLoopCount = 0; // highest loop count before LGTM (tracks if fixes happened)
   let roundupDone = false;
@@ -255,14 +256,19 @@ export default function (pi: ExtensionAPI) {
     if (modifiedFiles.size > 0) {
       const count = modifiedFiles.size;
       const verb = reviewEnabled ? theme.fg("muted", "will review") : theme.fg("muted", "pending");
+      const issueIndicator = lastReviewHadIssues ? ` ${theme.fg("error", "issues found")}` : "";
       ctx.ui.setStatus(
         "code-review",
-        `${label} ${state} · ${verb} ${theme.fg("accent", String(count))} ${theme.fg("muted", count === 1 ? "file" : "files")} ${theme.fg("dim", "(Alt+R toggle)")}`,
+        `${label} ${state}${issueIndicator} · ${verb} ${theme.fg("accent", String(count))} ${theme.fg("muted", count === 1 ? "file" : "files")} ${theme.fg("dim", "(Alt+R toggle)")}`,
       );
       return;
     }
 
-    ctx.ui.setStatus("code-review", `${label} ${state} ${theme.fg("dim", "(Alt+R toggle)")}`);
+    const issueIndicator = lastReviewHadIssues ? ` ${theme.fg("error", "issues found")}` : "";
+    ctx.ui.setStatus(
+      "code-review",
+      `${label} ${state}${issueIndicator} ${theme.fg("dim", "(Alt+R toggle)")}`,
+    );
   }
 
   let isToggling = false;
@@ -482,10 +488,11 @@ export default function (pi: ExtensionAPI) {
       sessionChangeSummaries.push(best.content.slice(0, 5000));
 
       if (result.isLgtm) {
+        lastReviewHadIssues = false;
         // Check if roundup review should trigger:
         // - More than 1 review loop happened (fixes were made)
         // - Roundup hasn't already run this cycle
-        if (peakReviewLoopCount > 1 && !roundupDone) {
+        if (peakReviewLoopCount >= 1 && !roundupDone) {
           roundupDone = true;
           reviewLoopCount = 0;
           sendReviewResult(pi, result, "", { reviewedFiles: best.files });
@@ -514,6 +521,7 @@ export default function (pi: ExtensionAPI) {
         }
       } else {
         peakReviewLoopCount = Math.max(peakReviewLoopCount, reviewLoopCount);
+        lastReviewHadIssues = true;
         sendReviewResult(pi, result, "", {
           showLoopCount: `loop ${reviewLoopCount}/${settings.maxReviewLoops}`,
           reviewedFiles: best.files,
