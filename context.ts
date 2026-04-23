@@ -247,14 +247,52 @@ export async function getBestReviewContent(
     /* git not available */
   }
 
-  // 4. Fall back to tool call summaries (no git)
+  // 4. Fall back: read files directly (no git available)
+  // Collect all potential file paths from tool calls and read them
   if (agentToolCalls.length > 0) {
+    const { collectModifiedPaths, isBinaryPath, MAX_NON_GIT_FILE_SIZE } = await import("./changes");
+    const candidatePaths = collectModifiedPaths(agentToolCalls);
+
+    const parts: string[] = [];
+    const reviewedFiles: string[] = [];
+
+    for (const filePath of candidatePaths) {
+      if (isBinaryPath(filePath)) continue;
+
+      onStatus?.(`reading ${filePath}…`);
+      try {
+        const result = await pi.exec(
+          "head",
+          ["-c", String(MAX_NON_GIT_FILE_SIZE + 100), filePath],
+          { timeout: 5000 },
+        );
+        if (result.code !== 0 || !result.stdout) continue;
+
+        // Skip files that look binary (contain null bytes)
+        if (result.stdout.includes("\0")) continue;
+
+        // Skip files larger than limit
+        if (result.stdout.length > MAX_NON_GIT_FILE_SIZE) continue;
+
+        reviewedFiles.push(filePath);
+        parts.push(`### ${filePath}\n\`\`\`\n${result.stdout.slice(0, 10000)}\n\`\`\``);
+      } catch {
+        // File doesn't exist or can't be read — skip
+      }
+    }
+
+    // Also include the tool call summary for context
     const summary = buildChangeSummary(agentToolCalls);
-    if (summary.trim()) {
-      const trackedFiles = agentToolCalls
-        .filter((t) => t.input?.path)
-        .map((t) => t.input.path as string);
-      return { content: summary, label: "tracked changes", files: trackedFiles };
+
+    if (parts.length > 0 || summary.trim()) {
+      const content = [
+        parts.length > 0 ? `## Files (read directly, no git)\n\n${parts.join("\n\n")}` : "",
+        summary.trim() ? `## Tool call summary\n\n${summary}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n\n---\n\n");
+
+      return { content, label: "tracked changes", files: reviewedFiles };
     }
   }
 

@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { hasFileChanges, isFileModifyingTool, buildChangeSummary } from "../changes";
+import {
+  hasFileChanges,
+  isFileModifyingTool,
+  buildChangeSummary,
+  isBinaryPath,
+  extractPathsFromBashCommand,
+  collectModifiedPaths,
+} from "../changes";
 
 describe("hasFileChanges", () => {
   it("hasFileChanges_WriteToolCall_ReturnsTrue", () => {
@@ -82,5 +89,67 @@ describe("buildChangeSummary", () => {
   it("buildChangeSummary_ReadOnlyCalls_ReturnsEmpty", () => {
     const result = buildChangeSummary([{ name: "read", input: { path: "foo.ts" } }]);
     expect(result).toBe("");
+  });
+});
+
+describe("isBinaryPath", () => {
+  it("isBinaryPath_PngFile_ReturnsTrue", () => {
+    expect(isBinaryPath("image.png")).toBe(true);
+  });
+
+  it("isBinaryPath_TypeScriptFile_ReturnsFalse", () => {
+    expect(isBinaryPath("src/index.ts")).toBe(false);
+  });
+
+  it("isBinaryPath_WasmFile_ReturnsTrue", () => {
+    expect(isBinaryPath("module.wasm")).toBe(true);
+  });
+});
+
+describe("extractPathsFromBashCommand", () => {
+  it("extractPathsFromBashCommand_RedirectToFile_ExtractsPath", () => {
+    const paths = extractPathsFromBashCommand('echo "hello" > /tmp/output.txt');
+    expect(paths.some((p) => p.includes("output.txt"))).toBe(true);
+  });
+
+  it("extractPathsFromBashCommand_QuotedPath_ExtractsPath", () => {
+    const paths = extractPathsFromBashCommand('cat "src/index.ts"');
+    expect(paths).toContain("src/index.ts");
+  });
+
+  it("extractPathsFromBashCommand_NoPaths_ReturnsEmpty", () => {
+    const paths = extractPathsFromBashCommand("echo hello");
+    expect(paths).toEqual([]);
+  });
+
+  it("extractPathsFromBashCommand_SkipsBinaryPaths", () => {
+    const paths = extractPathsFromBashCommand("cp image.png /tmp/image.png");
+    expect(paths).toEqual([]);
+  });
+});
+
+describe("collectModifiedPaths", () => {
+  it("collectModifiedPaths_WriteAndEdit_CollectsPaths", () => {
+    const paths = collectModifiedPaths([
+      { name: "write", input: { path: "foo.ts" } },
+      { name: "edit", input: { path: "bar.ts" } },
+    ]);
+    expect(paths).toContain("foo.ts");
+    expect(paths).toContain("bar.ts");
+  });
+
+  it("collectModifiedPaths_BashWithPaths_ExtractsThem", () => {
+    const paths = collectModifiedPaths([
+      { name: "bash", input: { command: "python3 -c \"open('config.json', 'w')\"" } },
+    ]);
+    expect(paths).toContain("config.json");
+  });
+
+  it("collectModifiedPaths_Deduplicates", () => {
+    const paths = collectModifiedPaths([
+      { name: "write", input: { path: "foo.ts" } },
+      { name: "edit", input: { path: "foo.ts" } },
+    ]);
+    expect(paths).toEqual(["foo.ts"]);
   });
 });

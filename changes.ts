@@ -4,6 +4,60 @@
 
 export const FILE_MODIFYING_TOOLS = ["write", "edit"];
 
+const MAX_NON_GIT_FILE_SIZE = 100_000;
+
+/** Common binary file extensions to skip */
+const BINARY_EXTENSIONS = new Set([
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".gif",
+  ".webp",
+  ".ico",
+  ".svg",
+  ".woff",
+  ".woff2",
+  ".ttf",
+  ".eot",
+  ".otf",
+  ".zip",
+  ".gz",
+  ".tar",
+  ".bz2",
+  ".7z",
+  ".rar",
+  ".exe",
+  ".dll",
+  ".so",
+  ".dylib",
+  ".bin",
+  ".pdf",
+  ".doc",
+  ".docx",
+  ".xls",
+  ".xlsx",
+  ".mp3",
+  ".mp4",
+  ".avi",
+  ".mov",
+  ".wav",
+  ".pyc",
+  ".class",
+  ".o",
+  ".obj",
+  ".wasm",
+  ".sqlite",
+  ".db",
+]);
+
+/**
+ * Check if a file path looks like a binary file.
+ */
+export function isBinaryPath(filePath: string): boolean {
+  const ext = filePath.slice(filePath.lastIndexOf(".")).toLowerCase();
+  return BINARY_EXTENSIONS.has(ext);
+}
+
 export interface TrackedToolCall {
   name: string;
   input: any;
@@ -26,6 +80,50 @@ export function hasFileChanges(toolCalls: TrackedToolCall[]): boolean {
 export function isFileModifyingTool(toolName: string): boolean {
   return FILE_MODIFYING_TOOLS.includes(toolName) || toolName === "bash";
 }
+
+/**
+ * Extract potential file paths from a bash command string.
+ * Best-effort: catches common patterns like redirections, common tools.
+ */
+export function extractPathsFromBashCommand(command: string): string[] {
+  const paths: string[] = [];
+
+  // Match quoted or unquoted file paths (absolute or relative)
+  // Patterns: > file, >> file, tool file, cp/mv src dst
+  const pathPattern = /(?:['"]([^'"]+\.\w+)['"]|\b(\/[\w./-]+\.\w+)\b|\b(\w[\w./-]*\.\w{1,10})\b)/g;
+  let match;
+  while ((match = pathPattern.exec(command)) !== null) {
+    const p = match[1] || match[2] || match[3];
+    if (p && !p.startsWith("-") && !isBinaryPath(p)) {
+      paths.push(p);
+    }
+  }
+
+  return [...new Set(paths)];
+}
+
+/**
+ * Collect all potential file paths from tracked tool calls.
+ * Includes explicit paths from write/edit and extracted paths from bash.
+ */
+export function collectModifiedPaths(toolCalls: TrackedToolCall[]): string[] {
+  const paths = new Set<string>();
+
+  for (const tc of toolCalls) {
+    if ((tc.name === "write" || tc.name === "edit") && tc.input?.path) {
+      paths.add(tc.input.path);
+    }
+    if (tc.name === "bash" && tc.input?.command) {
+      for (const p of extractPathsFromBashCommand(tc.input.command)) {
+        paths.add(p);
+      }
+    }
+  }
+
+  return [...paths];
+}
+
+export { MAX_NON_GIT_FILE_SIZE };
 
 /**
  * Build a human-readable summary of file changes from tool calls.
