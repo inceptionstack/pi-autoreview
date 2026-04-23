@@ -17,6 +17,7 @@ import {
   AuthStorage,
   ModelRegistry,
   createReadOnlyTools,
+  createBashTool,
   type AgentSessionEvent,
 } from "@mariozechner/pi-coding-agent";
 
@@ -48,7 +49,8 @@ export async function runReviewSession(prompt: string, opts: ReviewOptions): Pro
     sessionManager: SessionManager.inMemory(),
     authStorage,
     modelRegistry,
-    tools: createReadOnlyTools(opts.cwd),
+    // Read-only tools + bash for full exploration capability
+    tools: [...createReadOnlyTools(opts.cwd), createBashTool(opts.cwd)],
   });
 
   // Set the reviewer model if specified
@@ -84,6 +86,8 @@ export async function runReviewSession(prompt: string, opts: ReviewOptions): Pro
         const args = ev.args as any;
         if (name === "read") {
           opts.onActivity(`reading ${args?.path ?? "file"}`);
+        } else if (name === "bash") {
+          opts.onActivity(`$ ${(args?.command ?? "").slice(0, 50)}`);
         } else if (name === "find" || name === "grep" || name === "ls") {
           opts.onActivity(`${name} ${(args?.path ?? args?.pattern ?? "").slice(0, 40)}`);
         } else {
