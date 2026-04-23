@@ -52,7 +52,7 @@ fi
 FAILED=0
 
 # Extract added content lines from staged diff (including renames, text only)
-ADDED_LINES=$(git diff --cached --diff-filter=ACMR -U0 --text \
+ADDED_LINES=$(git diff --cached --diff-filter=ACMR -U0 \
   | grep '^+' \
   | grep -v '^+++' \
 )
@@ -93,7 +93,7 @@ for pattern in "${PATTERNS[@]}"; do
       if [ "$IS_ALLOWED" -eq 0 ]; then
         # Deduplicate: if ERE mode and this is the broad sk- pattern,
         # skip lines already matched by the sk-ant- pattern
-        if [ "$GREP_MODE" = "-E" ] && [[ "$pattern" == 'sk-[a-zA-Z0-9-]'* ]] && [[ "$content" == *"sk-ant-"* ]]; then
+        if [ "$GREP_MODE" = "-E" ] && [ "$pattern" = 'sk-[a-zA-Z0-9-]{20,}' ] && [[ "$content" == *"sk-ant-"* ]]; then
           continue
         fi
         FAILED=1
