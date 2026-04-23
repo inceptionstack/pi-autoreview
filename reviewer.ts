@@ -131,7 +131,7 @@ export function sendReviewResult(
         content: `✅ **Automated Code Review**${label ? ` (${label})` : ""}\n\nReview found no issues. Looks good!\n\nIf you were waiting to push until after reviews were done — all reviews are done, no issues found. Safe to push.`,
         display: true,
       },
-      { triggerTurn: false, deliverAs: "followUp" },
+      { triggerTurn: true, deliverAs: "followUp" },
     );
   } else {
     console.log("[auto-review] Reviewer found issues, feeding back...");
