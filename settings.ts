@@ -75,7 +75,7 @@ export const DEFAULT_SETTINGS: AutoReviewSettings = {
   maxReviewLoops: 100,
   model: "amazon-bedrock/us.anthropic.claude-opus-4-6-v1",
   thinkingLevel: "off",
-  roundupEnabled: false,
+  roundupEnabled: true, // gated by heuristics + LLM judge when true
   reviewTimeoutMs: 120_000,
   toggleShortcut: DEFAULT_TOGGLE_SHORTCUT,
   cancelShortcut: DEFAULT_CANCEL_SHORTCUT,

@@ -32,7 +32,7 @@ import { runReviewSession, sendReviewResult } from "./reviewer";
 import { type TrackedToolCall, hasFileChanges, isFileModifyingTool, collectModifiedPaths } from "./changes";
 import { getBestReviewContent } from "./context";
 import { loadIgnorePatterns, filterIgnored } from "./ignore";
-import { loadRoundupRules, runRoundupReview } from "./roundup";
+import { loadRoundupRules, runRoundupReview, checkRoundupHeuristics, runRoundupJudge } from "./roundup";
 import { findGitRoot, resolveAllGitRoots } from "./git-roots";
 import { log, logRotate } from "./logger";
 
@@ -54,6 +54,7 @@ export default function (pi: ExtensionAPI) {
   let roundupDone = false;
   let roundupRules: string | null = null;
   let sessionChangeSummaries: string[] = []; // accumulates change summaries across loops
+  let sessionChangedFiles = new Set<string>(); // accumulates files across review loops for roundup
 
   let settings: AutoReviewSettings = { ...DEFAULT_SETTINGS };
   let customRules: string | null = null;
@@ -203,6 +204,7 @@ export default function (pi: ExtensionAPI) {
         lastReviewedContentHash = "";
         roundupDone = false;
         sessionChangeSummaries = [];
+        sessionChangedFiles = new Set();
         if (ctx.hasUI) ctx.ui.notify(`Auto-review: on`, "info");
         // Only prompt to review if agent is idle and there are pending files.
         // If agent is mid-turn, silently enable — review triggers at next agent_end.
@@ -434,43 +436,67 @@ export default function (pi: ExtensionAPI) {
         buildReviewOptions(reviewAbort.signal, ctx.cwd, best.files, (desc) => updateStatus(ctx, desc)),
       );
 
-      // Track change summary for roundup
+      // Track change summary and files for roundup
       sessionChangeSummaries.push(best.content.slice(0, 5000));
+      for (const f of best.files) sessionChangedFiles.add(f);
 
       // Mark content as reviewed (only after successful completion)
       lastReviewedContentHash = contentHash;
 
       if (result.isLgtm) {
         lastReviewHadIssues = false;
-        // Check if roundup review should trigger:
-        // - More than 1 review loop happened (fixes were made)
-        // - Roundup hasn't already run this cycle
-        if (settings.roundupEnabled && peakReviewLoopCount >= 1 && !roundupDone) {
-          roundupDone = true;
-          reviewLoopCount = 0;
-          sendReviewResult(pi, result, "", { reviewedFiles: best.files });
+        reviewLoopCount = 0;
+        sendReviewResult(pi, result, "", { reviewedFiles: best.files });
 
-          // Run roundup
-          updateStatus(ctx, "roundup review…");
-          try {
-            const summaryText = sessionChangeSummaries.join("\n\n---\n\n");
-            await runRoundupReview({
-              pi,
+        // Gated roundup: heuristics → judge → full roundup
+        if (settings.roundupEnabled && !roundupDone) {
+          roundupDone = true;
+          const heuristic = checkRoundupHeuristics({
+            changedFiles: [...sessionChangedFiles],
+            peakLoopCount: peakReviewLoopCount,
+            changeSummaries: sessionChangeSummaries,
+          });
+
+          if (heuristic === "maybe") {
+            updateStatus(ctx, "roundup judge…");
+            const judge = await runRoundupJudge({
               signal: reviewAbort!.signal,
               cwd: ctx.cwd,
               model: settings.model,
-              customRules: roundupRules,
-              sessionChangeSummary: summaryText,
-              onActivity: (desc) => updateStatus(ctx, `roundup: ${desc}`),
+              changedFiles: [...sessionChangedFiles],
+              peakLoopCount: peakReviewLoopCount,
+              changeSummaries: sessionChangeSummaries,
+              onActivity: (desc) => updateStatus(ctx, `judge: ${desc}`),
             });
-          } catch (err: any) {
-            if (err?.message !== "Review cancelled") {
-              log(`ERROR: Roundup review failed: ${err?.message ?? err}`);
+
+            if (judge.recommended) {
+              log(`roundup: running — ${judge.reason}`);
+              updateStatus(ctx, "roundup review…");
+              try {
+                const summaryText = sessionChangeSummaries.join("\n\n---\n\n");
+                await runRoundupReview({
+                  pi,
+                  signal: reviewAbort!.signal,
+                  cwd: ctx.cwd,
+                  model: settings.model,
+                  customRules: roundupRules,
+                  sessionChangeSummary: summaryText,
+                  onActivity: (desc) => updateStatus(ctx, `roundup: ${desc}`),
+                });
+              } catch (err: any) {
+                if (err?.message === "Review cancelled") throw err;
+                log(`ERROR: Roundup review failed: ${err?.message ?? err}`);
+              } finally {
+                // Reset accumulated state so next roundup cycle starts fresh
+                sessionChangeSummaries = [];
+                sessionChangedFiles = new Set();
+                peakReviewLoopCount = 0;
+                roundupDone = false;
+              }
+            } else {
+              log(`roundup: skipped by judge — ${judge.reason}`);
             }
           }
-        } else {
-          reviewLoopCount = 0;
-          sendReviewResult(pi, result, "", { reviewedFiles: best.files });
         }
       } else {
         peakReviewLoopCount = Math.max(peakReviewLoopCount, reviewLoopCount);
@@ -544,6 +570,7 @@ export default function (pi: ExtensionAPI) {
       roundupDone = false;
       lastReviewHadIssues = false;
       sessionChangeSummaries = [];
+      sessionChangedFiles = new Set();
       clearActivityTimer();
       resetTrackingState(ctx);
       if (ctx.hasUI) ctx.ui.notify("Auto-review fully reset", "info");
@@ -688,6 +715,7 @@ export default function (pi: ExtensionAPI) {
     lastReviewedContentHash = "";
     roundupDone = false;
     sessionChangeSummaries = [];
+    sessionChangedFiles = new Set();
 
     const [rules, settingsResult, patterns, rRules] = await Promise.all([
       loadReviewRules(ctx.cwd),
