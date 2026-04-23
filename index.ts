@@ -240,7 +240,12 @@ export default function (pi: ExtensionAPI) {
   let isToggling = false;
   let fileCapWarned = false;
 
-  async function toggleReview(ctx: { ui: any; hasUI?: boolean; cwd: string }) {
+  async function toggleReview(ctx: {
+    ui: any;
+    hasUI?: boolean;
+    cwd: string;
+    isIdle?: () => boolean;
+  }) {
     if (isToggling) return;
     isToggling = true;
 
@@ -249,12 +254,15 @@ export default function (pi: ExtensionAPI) {
       if (reviewEnabled) {
         reviewLoopCount = 0;
         if (ctx.hasUI) ctx.ui.notify(`Auto-review: on`, "info");
-        if (modifiedFiles.size > 0 && ctx.hasUI) {
+        // Only prompt to review if agent is idle and there are pending files.
+        // If agent is mid-turn, silently enable — review triggers at next agent_end.
+        const idle = ctx.isIdle?.() ?? true;
+        if (modifiedFiles.size > 0 && ctx.hasUI && idle) {
           const count = modifiedFiles.size;
           const ok = await ctx.ui.confirm(
             "Run review now?",
             `${count} file${count > 1 ? "s" : ""} changed while auto-review was off. Review them now?`,
-            { timeout: 30000 }, // 30s timeout, auto-decline
+            { timeout: 30000 },
           );
           if (ok) {
             reviewLoopCount++;
