@@ -50,9 +50,18 @@ function ts(): string {
   return new Date().toISOString();
 }
 
+function safeStringify(a: any): string {
+  if (typeof a === "string") return a;
+  try {
+    return JSON.stringify(a);
+  } catch {
+    return String(a);
+  }
+}
+
 export function log(...args: any[]) {
   ensureDirs();
-  const line = `[${ts()}] ${args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ")}\n`;
+  const line = `[${ts()}] ${args.map(safeStringify).join(" ")}\n`;
   try {
     appendFileSync(LOG_FILE, line);
   } catch {

@@ -356,14 +356,17 @@ export default function (pi: ExtensionAPI) {
   pi.on("tool_execution_end", async (event) => {
     const pending = pendingArgs.get(event.toolCallId);
     pendingArgs.delete(event.toolCallId);
+    const rawContent = event.result?.content;
     agentToolCalls.push({
       name: event.toolName,
       input: pending?.input ?? {},
-      result: event.result?.content
-        ?.filter((c: any) => c.type === "text")
-        .map((c: any) => c.text)
-        .join("\n")
-        .slice(0, 2000),
+      result: Array.isArray(rawContent)
+        ? rawContent
+            .filter((c: any) => c.type === "text")
+            .map((c: any) => c.text)
+            .join("\n")
+            .slice(0, 2000)
+        : undefined,
     });
   });
 
@@ -668,6 +671,15 @@ export default function (pi: ExtensionAPI) {
       }
 
       ctx.ui.notify("Reviewing commits…", "info");
+
+      // Prevent concurrent reviews — cancel any in-progress auto-review
+      if (isReviewing && reviewAbort) {
+        log("Cancelling in-progress review for /review N");
+        reviewAbort.abort();
+        isReviewing = false;
+        reviewAbort = null;
+      }
+
       isReviewing = true;
       reviewAbort = new AbortController();
       updateStatus(ctx);

@@ -251,10 +251,12 @@ export async function runReviewSession(prompt: string, opts: ReviewOptions): Pro
   async function sendPrompt(text: string, timeoutMs: number): Promise<void> {
     await new Promise<void>((resolve, reject) => {
       let settled = false;
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
       const onAbort = () => {
         if (settled) return;
         settled = true;
-        clearTimeout(timeoutId);
+        if (timeoutId) clearTimeout(timeoutId);
         session.abort();
         reject(new Error("Review cancelled"));
       };
@@ -266,7 +268,7 @@ export async function runReviewSession(prompt: string, opts: ReviewOptions): Pro
 
       opts.signal.addEventListener("abort", onAbort, { once: true });
 
-      const timeoutId = setTimeout(() => {
+      timeoutId = setTimeout(() => {
         if (settled) return;
         log(`reviewer: timed out after ${timeoutMs / 1000}s`);
         settled = true;

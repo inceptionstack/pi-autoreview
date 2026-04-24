@@ -397,6 +397,7 @@ export async function getContentFromCwd(
 
 export async function getContentFromLastCommit(
   pi: ExtensionAPI,
+  ignorePatterns: string[] | undefined,
   summarySection: string,
   onStatus?: (msg: string) => void,
 ): Promise<ReviewContent | null> {
@@ -405,14 +406,30 @@ export async function getContentFromLastCommit(
     const lastCommitDiff = await pi.exec("git", ["diff", "HEAD~1", "HEAD"], { timeout: 15000 });
     if (lastCommitDiff.code !== 0 || !lastCommitDiff.stdout.trim()) return null;
 
-    const truncated = truncateDiff(lastCommitDiff.stdout.trim(), 30000);
     const commitLog = (
       await pi.exec("git", ["log", "--oneline", "-10"], { timeout: 5000 })
     ).stdout.trim();
     const nameResult = await pi.exec("git", ["diff", "HEAD~1", "HEAD", "--name-only"], {
       timeout: 5000,
     });
-    const files = nameResult.code === 0 ? nameResult.stdout.trim().split("\n").filter(Boolean) : [];
+    let files = nameResult.code === 0 ? nameResult.stdout.trim().split("\n").filter(Boolean) : [];
+
+    // Apply ignore patterns so the last-commit fallback respects .autoreview/ignore
+    if (ignorePatterns && ignorePatterns.length > 0) {
+      files = filterIgnored(files, ignorePatterns);
+    }
+    if (files.length === 0) return null;
+
+    // Re-scope diff to filtered files only
+    let diff = lastCommitDiff.stdout.trim();
+    if (ignorePatterns && ignorePatterns.length > 0) {
+      const scopedResult = await pi.exec("git", ["diff", "HEAD~1", "HEAD", "--", ...files], { timeout: 15000 });
+      if (scopedResult.code === 0 && scopedResult.stdout.trim()) {
+        diff = scopedResult.stdout.trim();
+      }
+    }
+
+    const truncated = truncateDiff(diff, 30000);
 
     const { sections: fileSections } = await readChangedFiles(pi, files, { onStatus });
     const fileSection =
@@ -515,7 +532,7 @@ export async function getBestReviewContent(
   const cwdResult = await getContentFromCwd(pi, ignorePatterns, summarySection, onStatus);
   if (cwdResult) return cwdResult;
 
-  const lastCommitResult = await getContentFromLastCommit(pi, summarySection, onStatus);
+  const lastCommitResult = await getContentFromLastCommit(pi, ignorePatterns, summarySection, onStatus);
   if (lastCommitResult) return lastCommitResult;
 
   return getContentFromToolCalls(pi, agentToolCalls, changeSummary, onStatus);

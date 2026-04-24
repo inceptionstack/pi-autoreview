@@ -233,7 +233,7 @@ function isNonModifyingPart(part: string): boolean {
  * Examples: `git push`, `aws s3 ls`, `curl https://api`, `cd foo && git log`
  */
 export function isNonFileModifyingCommand(command: string): boolean {
-  if (!command) return false;
+  if (!command || typeof command !== "string") return false;
 
   // Split on && || ; to handle command chains
   const parts = command
@@ -328,7 +328,7 @@ export function buildChangeSummary(toolCalls: TrackedToolCall[]): string {
     .filter((tc) => FILE_MODIFYING_TOOLS.includes(tc.name) || tc.name === "bash")
     .map((tc) => {
       if (tc.name === "write") {
-        return `WROTE file: ${tc.input?.path}\n${(tc.input?.content ?? "").slice(0, 3000)}`;
+        return `WROTE file: ${tc.input?.path}\n${String(tc.input?.content ?? "").slice(0, 3000)}`;
       }
       if (tc.name === "edit") {
         const rawEdits = tc.input?.edits;
@@ -336,13 +336,13 @@ export function buildChangeSummary(toolCalls: TrackedToolCall[]): string {
         const editSummary = edits
           .map(
             (e: any, i: number) =>
-              `  Edit ${i + 1}:\n    OLD: ${(e.oldText ?? "").slice(0, 500)}\n    NEW: ${(e.newText ?? "").slice(0, 500)}`,
+              `  Edit ${i + 1}:\n    OLD: ${String(e.oldText ?? "").slice(0, 500)}\n    NEW: ${String(e.newText ?? "").slice(0, 500)}`,
           )
           .join("\n");
         return `EDITED file: ${tc.input?.path}\n${editSummary}`;
       }
       if (tc.name === "bash") {
-        return `BASH: ${tc.input?.command}\n→ ${(tc.result ?? "").slice(0, 1000)}`;
+        return `BASH: ${tc.input?.command}\n→ ${String(tc.result ?? "").slice(0, 1000)}`;
       }
       return `${tc.name}: ${JSON.stringify(tc.input).slice(0, 500)}`;
     })
