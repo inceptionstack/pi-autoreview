@@ -408,9 +408,10 @@ export function sendReviewResult(
   label: string,
   opts?: { showLoopCount?: string; reviewedFiles?: string[] },
 ): void {
-  // If no files were reviewed, silently skip — nothing to report
-  if (opts?.reviewedFiles && opts.reviewedFiles.length === 0) {
-    log(`reviewer: skipping message — zero reviewed files`);
+  // If no files were reviewed and it's LGTM, silently skip — nothing to report.
+  // Always show issues even with zero files (tool-call-only reviews can find bugs).
+  if (result.isLgtm && opts?.reviewedFiles && opts.reviewedFiles.length === 0) {
+    log(`reviewer: skipping LGTM message — zero reviewed files`);
     return;
   }
 

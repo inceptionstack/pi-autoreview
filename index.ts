@@ -52,6 +52,12 @@ import {
 } from "./roundup";
 import { findGitRoot, resolveAllGitRoots } from "./git-roots";
 import { log, logRotate } from "./logger";
+import {
+  SCAFFOLD_SETTINGS,
+  SCAFFOLD_REVIEW_RULES,
+  SCAFFOLD_ROUNDUP_RULES,
+  SCAFFOLD_IGNORE,
+} from "./scaffold";
 
 const MAX_TRACKED_FILES = 1000;
 
@@ -654,94 +660,40 @@ export default function (pi: ExtensionAPI) {
   // ── /scaffold-review-files command ─────────────────
 
   pi.registerCommand("scaffold-review-files", {
-    description: "Create .senior-review/ config templates in the current project",
-    handler: async (_args, ctx) => {
+    description:
+      "Create .senior-review/ config templates in a git repo. Usage: /scaffold-review-files [path]",
+    handler: async (args, ctx) => {
       const { mkdirSync, writeFileSync, existsSync } = await import("node:fs");
-      const { join } = await import("node:path");
+      const { join, resolve } = await import("node:path");
 
-      const dir = join(ctx.cwd, ".senior-review");
+      // Determine target directory: optional arg or cwd
+      const targetBase = args?.trim() ? resolve(ctx.cwd, args.trim()) : ctx.cwd;
+
+      // Must be inside a git repo
+      const gitCheck = await pi.exec("git", ["-C", targetBase, "rev-parse", "--show-toplevel"], {
+        timeout: 5000,
+      });
+      if (gitCheck.code !== 0) {
+        const msg =
+          `Not a git repository: ${targetBase}\n\n` +
+          `Usage:\n` +
+          `  /scaffold-review-files              — scaffold in current directory\n` +
+          `  /scaffold-review-files /path/to/repo — scaffold in a specific git repo`;
+        if (ctx.hasUI) ctx.ui.notify(msg, "error");
+        log(`scaffold: refused — not a git repo: ${targetBase}`);
+        return;
+      }
+
+      const gitRoot = gitCheck.stdout.trim();
+
+      const dir = join(gitRoot, ".senior-review");
       mkdirSync(dir, { recursive: true });
 
       const files: Record<string, string> = {
-        "settings.json": JSON.stringify(
-          {
-            maxReviewLoops: 100,
-            model: "amazon-bedrock/us.anthropic.claude-opus-4-6-v1",
-            thinkingLevel: "off",
-            roundupEnabled: true,
-            reviewTimeoutMs: 120000,
-            toggleShortcut: "alt+r",
-            cancelShortcut: "",
-          },
-          null,
-          2,
-        ),
-        "review-rules.md": `# Project review rules
-
-## Architecture
-
-- All API routes must go through the middleware chain
-- Database access only via the repository layer, never direct queries
-- No business logic in controllers — delegate to services
-
-## Code standards
-
-- All public functions must have JSDoc comments
-- No \`console.log\` in production code — use the logger
-- All API endpoints must validate input with zod schemas
-
-## Security
-
-- No secrets in code — use environment variables
-- All user input must be sanitized before database queries
-- Authentication required on all non-public routes
-`,
-        "roundup.md": `# Roundup review rules
-
-## Architecture coherence
-
-- Verify the module dependency graph has no unexpected cycles
-- Check that layering is respected (e.g. UI → Service → Repository → Database)
-- Flag any god-objects or god-modules that accumulated too many responsibilities
-
-## Cross-cutting concerns
-
-- Error handling strategy consistent across all modules
-- Logging follows the same patterns everywhere
-- Configuration accessed the same way in all files
-
-## Technical debt
-
-- Flag any TODO/FIXME/HACK comments that were added
-- Identify code that was clearly written in haste during fix loops
-- Check for dead code or unused imports that accumulated
-
-## Documentation
-
-- README still accurate after all changes
-- Architecture docs reflect current state
-- Changed public APIs have updated JSDoc/comments
-`,
-        ignore: `# Files to skip during review (gitignore syntax)
-
-# Dependencies & lock files
-package-lock.json
-yarn.lock
-pnpm-lock.yaml
-
-# Build output
-dist/**
-build/**
-*.min.js
-*.min.css
-
-# Generated files
-*.generated.ts
-*.d.ts
-
-# Snapshots
-*.snap
-`,
+        "settings.json": SCAFFOLD_SETTINGS,
+        "review-rules.md": SCAFFOLD_REVIEW_RULES,
+        "roundup.md": SCAFFOLD_ROUNDUP_RULES,
+        ignore: SCAFFOLD_IGNORE,
       };
 
       let created = 0;
@@ -760,8 +712,8 @@ build/**
 
       const msg =
         created > 0
-          ? `Created ${created} file(s) in .senior-review/${skipped > 0 ? ` (${skipped} already existed)` : ""}`
-          : `All files already exist in .senior-review/`;
+          ? `Created ${created} file(s) in ${dir}${skipped > 0 ? ` (${skipped} already existed)` : ""}`
+          : `All files already exist in ${dir}`;
 
       if (ctx.hasUI) ctx.ui.notify(msg, "info");
       log(`scaffold: ${msg}`);
