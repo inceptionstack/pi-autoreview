@@ -127,6 +127,39 @@ export default function (pi: ExtensionAPI) {
   }
 
   /**
+   * Build per-file review sections with path, diff, and recent commits.
+   * Shared by /review-all paths A and B.
+   */
+  async function buildFileSections(
+    gitRoot: string,
+    files: string[],
+    diffArgs: string[],
+  ): Promise<string[]> {
+    const sections: string[] = [];
+    for (const file of files) {
+      const fullPath = `${gitRoot}/${file}`;
+      const fileDiffResult = await pi.exec(
+        "git", ["diff", ...diffArgs, "--", file], { timeout: 10000 },
+      );
+      const fileDiff = fileDiffResult.code === 0 ? fileDiffResult.stdout.trim() : "";
+      const commitsResult = await pi.exec(
+        "git", ["log", "--oneline", "-5", "--", file], { timeout: 5000 },
+      );
+      const commits = commitsResult.code === 0 ? commitsResult.stdout.trim() : "";
+
+      let section = `### ${fullPath}\n**Full path:** \`${fullPath}\`\n`;
+      if (commits) section += `\n**Recent commits:**\n\`\`\`\n${commits}\n\`\`\`\n`;
+      if (fileDiff) {
+        section += `\n**Diff:**\n\`\`\`diff\n${truncateDiff(fileDiff, LARGE_LIMITS.maxDiffSize)}\n\`\`\`\n`;
+      } else {
+        section += `\n*New/untracked file — read to review its contents.*\n`;
+      }
+      sections.push(section);
+    }
+    return sections;
+  }
+
+  /**
    * Start the visual review progress widget and return callbacks
    * for activity updates and tool call tracking.
    */
@@ -1137,42 +1170,33 @@ export default function (pi: ExtensionAPI) {
               return;
             }
 
-            // Build per-file sections
-            const fileSections: string[] = [];
-            for (const file of reviewFiles) {
-              const fullPath = `${gitRoot}/${file}`;
-              const fileDiffResult = await pi.exec(
-                "git", ["diff", "HEAD", "--", file], { timeout: 10000 },
-              );
-              const fileDiff = fileDiffResult.code === 0 ? fileDiffResult.stdout.trim() : "";
-              const commitsResult = await pi.exec(
-                "git", ["log", "--oneline", "-5", "--", file], { timeout: 5000 },
-              );
-              const commits = commitsResult.code === 0 ? commitsResult.stdout.trim() : "";
-
-              let section = `### ${fullPath}\n**Full path:** \`${fullPath}\`\n`;
-              if (commits) section += `\n**Recent commits:**\n\`\`\`\n${commits}\n\`\`\`\n`;
-              if (fileDiff) {
-                section += `\n**Diff:**\n\`\`\`diff\n${truncateDiff(fileDiff, LARGE_LIMITS.maxDiffSize)}\n\`\`\`\n`;
-              } else {
-                section += `\n*New/untracked file — read to review its contents.*\n`;
-              }
-              fileSections.push(section);
-            }
+            const fileSectionsA = await buildFileSections(gitRoot, reviewFiles, ["HEAD"]);
 
             ctx.ui.notify(`Reviewing ${reviewFiles.length} pending file(s)…`, "info");
-            prompt = `${buildReviewPrompt(autoReviewRules, customRules, lastUserMessage)}\n\n---\n\nReview all pending changes in the repo.\n\n## Files to review\n\nRead each file with read(path) to see its full contents.\n\n${fileSections.join("\n\n---\n\n")}`;
+            prompt = `${buildReviewPrompt(autoReviewRules, customRules, lastUserMessage)}\n\n---\n\nReview all pending changes in the repo.\n\n## Files to review\n\nRead each file with read(path) to see its full contents.\n\n${fileSectionsA.join("\n\n---\n\n")}`;
 
           } else {
             // ── Path B: no pending changes — review last commit ──
-            const lastDiff = await pi.exec("git", ["diff", "HEAD~1", "HEAD"], { timeout: 15000 });
-            if (lastDiff.code !== 0 || !lastDiff.stdout.trim()) {
+            // Handle single-commit repos by diffing against the empty tree
+            const countResult = await pi.exec("git", ["rev-list", "--count", "HEAD"], { timeout: 5000 });
+            const totalCommits = parseInt(countResult.stdout.trim(), 10) || 0;
+            if (totalCommits === 0) {
               ctx.ui.notify("No pending changes and no commits to review.", "info");
               return;
             }
 
+            let diffArgs: string[];
+            if (totalCommits === 1) {
+              const emptyTree = (
+                await pi.exec("git", ["hash-object", "-t", "tree", "/dev/null"], { timeout: 5000 })
+              ).stdout.trim();
+              diffArgs = [emptyTree, "HEAD"];
+            } else {
+              diffArgs = ["HEAD~1", "HEAD"];
+            }
+
             const lastNames = await pi.exec(
-              "git", ["diff", "HEAD~1", "HEAD", "--name-only"], { timeout: 5000 },
+              "git", ["diff", ...diffArgs, "--name-only"], { timeout: 5000 },
             );
             reviewFiles = lastNames.code === 0
               ? lastNames.stdout.trim().split("\n").filter(Boolean)
@@ -1191,29 +1215,10 @@ export default function (pi: ExtensionAPI) {
               await pi.exec("git", ["log", "--oneline", "-1"], { timeout: 5000 })
             ).stdout.trim();
 
-            // Build per-file sections
-            const fileSections: string[] = [];
-            for (const file of reviewFiles) {
-              const fullPath = `${gitRoot}/${file}`;
-              const fileDiffResult = await pi.exec(
-                "git", ["diff", "HEAD~1", "HEAD", "--", file], { timeout: 10000 },
-              );
-              const fileDiff = fileDiffResult.code === 0 ? fileDiffResult.stdout.trim() : "";
-              const commitsResult = await pi.exec(
-                "git", ["log", "--oneline", "-5", "--", file], { timeout: 5000 },
-              );
-              const commits = commitsResult.code === 0 ? commitsResult.stdout.trim() : "";
-
-              let section = `### ${fullPath}\n**Full path:** \`${fullPath}\`\n`;
-              if (commits) section += `\n**Recent commits:**\n\`\`\`\n${commits}\n\`\`\`\n`;
-              if (fileDiff) {
-                section += `\n**Diff:**\n\`\`\`diff\n${truncateDiff(fileDiff, LARGE_LIMITS.maxDiffSize)}\n\`\`\`\n`;
-              }
-              fileSections.push(section);
-            }
+            const fileSectionsB = await buildFileSections(gitRoot, reviewFiles, diffArgs);
 
             ctx.ui.notify(`Reviewing last commit (${commitLog})…`, "info");
-            prompt = `${buildReviewPrompt(autoReviewRules, customRules, lastUserMessage)}\n\n---\n\nReview the last commit: ${commitLog}\n\n## Files to review\n\nRead each file with read(path) to see its full contents.\n\n${fileSections.join("\n\n---\n\n")}`;
+            prompt = `${buildReviewPrompt(autoReviewRules, customRules, lastUserMessage)}\n\n---\n\nReview the last commit: ${commitLog}\n\n## Files to review\n\nRead each file with read(path) to see its full contents.\n\n${fileSectionsB.join("\n\n---\n\n")}`;
           }
 
         } else {
