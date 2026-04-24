@@ -22,7 +22,6 @@ import {
 export interface ReviewContext {
   diff: string;
   changedFiles: string[];
-  fileContents: Map<string, string>;
   fileTree: string;
   commitLog: string;
 }
@@ -166,11 +165,6 @@ export async function buildReviewContext(
     }
   }
 
-  const { contents: fileContents } = await readChangedFiles(pi, changedFiles, {
-    onStatus,
-    limits: lim,
-  });
-
   onStatus?.("scanning file tree…");
   const treeResult = await pi.exec(
     "find",
@@ -196,7 +190,7 @@ export async function buildReviewContext(
   const commitLogResult = await pi.exec("git", ["log", "--oneline", "-10"], { timeout: 5000 });
   const commitLog = commitLogResult.code === 0 ? commitLogResult.stdout.trim() : "";
 
-  return { diff, changedFiles, fileContents, fileTree, commitLog };
+  return { diff, changedFiles, fileTree, commitLog };
 }
 
 /**

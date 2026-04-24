@@ -6,7 +6,6 @@ function makeContext(overrides?: Partial<ReviewContext>): ReviewContext {
   return {
     diff: "diff --git a/foo.ts\n+const x = 1;",
     changedFiles: ["foo.ts"],
-    fileContents: new Map([["foo.ts", "const x = 1;"]]),
     fileTree: ".\n./foo.ts",
     commitLog: "",
     ...overrides,
@@ -28,10 +27,6 @@ describe("formatReviewContext", () => {
   it("formatReviewContext_MultipleFiles_ListsAll", () => {
     const ctx = makeContext({
       changedFiles: ["a.ts", "b.ts"],
-      fileContents: new Map([
-        ["a.ts", "a"],
-        ["b.ts", "b"],
-      ]),
     });
     const result = formatReviewContext(ctx);
     expect(result).toContain("## Changed files (2)");
