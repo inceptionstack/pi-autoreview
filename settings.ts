@@ -1,9 +1,9 @@
 /**
  * settings.ts — Configuration loading and validation
  *
- * Loads config from .autoreview/ in two locations (local takes precedence):
- *   1. cwd/.autoreview/   (project-local)
- *   2. ~/.pi/.autoreview/ (global)
+ * Loads config from .senior-review/ in two locations (local takes precedence):
+ *   1. cwd/.senior-review/   (project-local)
+ *   2. ~/.pi/.senior-review/ (global)
  *
  * Files: settings.json, review-rules.md
  */
@@ -14,16 +14,16 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 
 /**
- * Resolve the .autoreview config directory paths.
- * Returns [local, global] where local = cwd/.autoreview, global = ~/.pi/.autoreview.
+ * Resolve the .senior-review config directory paths.
+ * Returns [local, global] where local = cwd/.senior-review, global = ~/.pi/.senior-review.
  * Local takes precedence over global.
  */
 export function configDirs(cwd: string, home?: string): [string, string] {
-  return [join(cwd, ".autoreview"), join(home ?? homedir(), ".pi", ".autoreview")];
+  return [join(cwd, ".senior-review"), join(home ?? homedir(), ".pi", ".senior-review")];
 }
 
 /**
- * Read a config file, trying local (cwd/.autoreview/) first, then global (~/.pi/.autoreview/).
+ * Read a config file, trying local (cwd/.senior-review/) first, then global (~/.pi/.senior-review/).
  * Returns the file content or null if not found in either location.
  */
 export async function readConfigFile(
@@ -110,7 +110,7 @@ export function parseSettings(parsed: Record<string, unknown>): {
       settings.maxReviewLoops = parsed.maxReviewLoops;
     } else {
       errors.push(
-        `[auto-review] "maxReviewLoops" must be a positive integer (got ${JSON.stringify(parsed.maxReviewLoops)}). Using default: ${DEFAULT_SETTINGS.maxReviewLoops}.`,
+        `[senior-review] "maxReviewLoops" must be a positive integer (got ${JSON.stringify(parsed.maxReviewLoops)}). Using default: ${DEFAULT_SETTINGS.maxReviewLoops}.`,
       );
     }
   }
@@ -120,7 +120,7 @@ export function parseSettings(parsed: Record<string, unknown>): {
       settings.model = parsed.model;
     } else {
       errors.push(
-        `[auto-review] "model" must be "provider/model-id" (got ${JSON.stringify(parsed.model)}). Using default: ${DEFAULT_SETTINGS.model}.`,
+        `[senior-review] "model" must be "provider/model-id" (got ${JSON.stringify(parsed.model)}). Using default: ${DEFAULT_SETTINGS.model}.`,
       );
     }
   }
@@ -133,7 +133,7 @@ export function parseSettings(parsed: Record<string, unknown>): {
       settings.thinkingLevel = parsed.thinkingLevel;
     } else {
       errors.push(
-        `[auto-review] "thinkingLevel" must be one of ${VALID_THINKING_LEVELS.join(", ")} (got ${JSON.stringify(parsed.thinkingLevel)}). Using default: ${DEFAULT_SETTINGS.thinkingLevel}.`,
+        `[senior-review] "thinkingLevel" must be one of ${VALID_THINKING_LEVELS.join(", ")} (got ${JSON.stringify(parsed.thinkingLevel)}). Using default: ${DEFAULT_SETTINGS.thinkingLevel}.`,
       );
     }
   }
@@ -143,7 +143,7 @@ export function parseSettings(parsed: Record<string, unknown>): {
       settings.roundupEnabled = parsed.roundupEnabled;
     } else {
       errors.push(
-        `[auto-review] "roundupEnabled" must be a boolean (got ${JSON.stringify(parsed.roundupEnabled)}). Using default: ${DEFAULT_SETTINGS.roundupEnabled}.`,
+        `[senior-review] "roundupEnabled" must be a boolean (got ${JSON.stringify(parsed.roundupEnabled)}). Using default: ${DEFAULT_SETTINGS.roundupEnabled}.`,
       );
     }
   }
@@ -157,7 +157,7 @@ export function parseSettings(parsed: Record<string, unknown>): {
       settings.reviewTimeoutMs = parsed.reviewTimeoutMs;
     } else {
       errors.push(
-        `[auto-review] "reviewTimeoutMs" must be a positive integer (got ${JSON.stringify(parsed.reviewTimeoutMs)}). Using default: ${DEFAULT_SETTINGS.reviewTimeoutMs}.`,
+        `[senior-review] "reviewTimeoutMs" must be a positive integer (got ${JSON.stringify(parsed.reviewTimeoutMs)}). Using default: ${DEFAULT_SETTINGS.reviewTimeoutMs}.`,
       );
     }
   }
@@ -167,7 +167,7 @@ export function parseSettings(parsed: Record<string, unknown>): {
       settings.toggleShortcut = parsed.toggleShortcut.trim();
     } else {
       errors.push(
-        `[auto-review] "toggleShortcut" must be a non-empty string key id (got ${JSON.stringify(parsed.toggleShortcut)}). Using default: ${DEFAULT_SETTINGS.toggleShortcut}.`,
+        `[senior-review] "toggleShortcut" must be a non-empty string key id (got ${JSON.stringify(parsed.toggleShortcut)}). Using default: ${DEFAULT_SETTINGS.toggleShortcut}.`,
       );
     }
   }
@@ -177,7 +177,7 @@ export function parseSettings(parsed: Record<string, unknown>): {
       settings.cancelShortcut = parsed.cancelShortcut.trim();
     } else {
       errors.push(
-        `[auto-review] "cancelShortcut" must be a non-empty string key id (got ${JSON.stringify(parsed.cancelShortcut)}). Using default: ${DEFAULT_SETTINGS.cancelShortcut}.`,
+        `[senior-review] "cancelShortcut" must be a non-empty string key id (got ${JSON.stringify(parsed.cancelShortcut)}). Using default: ${DEFAULT_SETTINGS.cancelShortcut}.`,
       );
     }
   }
@@ -186,7 +186,7 @@ export function parseSettings(parsed: Record<string, unknown>): {
   for (const key of Object.keys(parsed)) {
     if (!knownKeys.has(key)) {
       errors.push(
-        `[auto-review] Unknown setting "${key}" (ignored). Known: ${[...knownKeys].join(", ")}.`,
+        `[senior-review] Unknown setting "${key}" (ignored). Known: ${[...knownKeys].join(", ")}.`,
       );
     }
   }
@@ -197,8 +197,8 @@ export function parseSettings(parsed: Record<string, unknown>): {
 // ── File loaders ─────────────────────────────────────
 
 /**
- * Load and validate .autoreview/settings.json.
- * Tries cwd/.autoreview/ first, then ~/.pi/.autoreview/.
+ * Load and validate .senior-review/settings.json.
+ * Tries cwd/.senior-review/ first, then ~/.pi/.senior-review/.
  */
 export async function loadSettings(
   cwd: string,
@@ -213,13 +213,13 @@ export async function loadSettings(
     parsed = JSON.parse(raw);
   } catch (e: any) {
     errors.push(
-      `[auto-review] .autoreview/settings.json is not valid JSON: ${e.message}. Using defaults.`,
+      `[senior-review] .senior-review/settings.json is not valid JSON: ${e.message}. Using defaults.`,
     );
     return { settings: { ...DEFAULT_SETTINGS }, errors };
   }
 
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    errors.push(`[auto-review] .autoreview/settings.json must be a JSON object. Using defaults.`);
+    errors.push(`[senior-review] .senior-review/settings.json must be a JSON object. Using defaults.`);
     return { settings: { ...DEFAULT_SETTINGS }, errors };
   }
 
@@ -228,8 +228,8 @@ export async function loadSettings(
 }
 
 /**
- * Synchronously load shortcut settings from .autoreview/settings.json.
- * Tries cwd/.autoreview/ first, then ~/.pi/.autoreview/.
+ * Synchronously load shortcut settings from .senior-review/settings.json.
+ * Tries cwd/.senior-review/ first, then ~/.pi/.senior-review/.
  * Used at extension init time (before session_start) for shortcut registration.
  * Falls back to defaults on any error — never throws.
  */
@@ -256,8 +256,8 @@ export function loadShortcutSettingsSync(cwd: string): ShortcutSettings {
 }
 
 /**
- * Load .autoreview/review-rules.md custom review rules.
- * Tries cwd/.autoreview/ first, then ~/.pi/.autoreview/.
+ * Load .senior-review/review-rules.md custom review rules.
+ * Tries cwd/.senior-review/ first, then ~/.pi/.senior-review/.
  */
 export async function loadReviewRules(cwd: string): Promise<string | null> {
   const content = await readConfigFile(cwd, "review-rules.md");

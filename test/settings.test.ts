@@ -240,11 +240,11 @@ describe("parseSettings", () => {
 
 describe("loadShortcutSettingsSync", () => {
   function makeTmpDir() {
-    const dir = mkdtempSync(join(tmpdir(), "autoreview-test-"));
+    const dir = mkdtempSync(join(tmpdir(), "senior-review-test-"));
     return {
       dir,
       writeSettings(obj: Record<string, unknown>) {
-        const settingsDir = join(dir, ".autoreview");
+        const settingsDir = join(dir, ".senior-review");
         mkdirSync(settingsDir, { recursive: true });
         writeFileSync(join(settingsDir, "settings.json"), JSON.stringify(obj));
       },
@@ -268,7 +268,7 @@ describe("loadShortcutSettingsSync", () => {
   it("returns defaults when settings file is invalid JSON", () => {
     const tmp = makeTmpDir();
     try {
-      const settingsDir = join(tmp.dir, ".autoreview");
+      const settingsDir = join(tmp.dir, ".senior-review");
       mkdirSync(settingsDir, { recursive: true });
       writeFileSync(join(settingsDir, "settings.json"), "not json");
       const result = loadShortcutSettingsSync(tmp.dir);
@@ -366,24 +366,24 @@ describe("loadShortcutSettingsSync", () => {
 describe("configDirs", () => {
   it("returns local and global dirs", () => {
     const [local, global] = configDirs("/project");
-    expect(local).toBe(join("/project", ".autoreview"));
-    expect(global).toBe(join(homedir(), ".pi", ".autoreview"));
+    expect(local).toBe(join("/project", ".senior-review"));
+    expect(global).toBe(join(homedir(), ".pi", ".senior-review"));
   });
 
   it("accepts custom home override", () => {
     const [local, global] = configDirs("/project", "/fakehome");
-    expect(local).toBe(join("/project", ".autoreview"));
-    expect(global).toBe(join("/fakehome", ".pi", ".autoreview"));
+    expect(local).toBe(join("/project", ".senior-review"));
+    expect(global).toBe(join("/fakehome", ".pi", ".senior-review"));
   });
 });
 
 describe("readConfigFile", () => {
   function makeDirs() {
-    const root = mkdtempSync(join(tmpdir(), "autoreview-cfg-"));
+    const root = mkdtempSync(join(tmpdir(), "senior-review-cfg-"));
     const localDir = join(root, "project");
     const fakeHome = join(root, "home");
-    const localCfg = join(localDir, ".autoreview");
-    const globalCfg = join(fakeHome, ".pi", ".autoreview");
+    const localCfg = join(localDir, ".senior-review");
+    const globalCfg = join(fakeHome, ".pi", ".senior-review");
     mkdirSync(localCfg, { recursive: true });
     mkdirSync(globalCfg, { recursive: true });
     return {

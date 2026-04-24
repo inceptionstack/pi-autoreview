@@ -414,7 +414,7 @@ export async function getContentFromLastCommit(
     });
     let files = nameResult.code === 0 ? nameResult.stdout.trim().split("\n").filter(Boolean) : [];
 
-    // Apply ignore patterns so the last-commit fallback respects .autoreview/ignore
+    // Apply ignore patterns so the last-commit fallback respects .senior-review/ignore
     if (ignorePatterns && ignorePatterns.length > 0) {
       files = filterIgnored(files, ignorePatterns);
     }

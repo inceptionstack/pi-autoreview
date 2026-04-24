@@ -1,24 +1,24 @@
 /**
- * pi-autoreview — Pi extension
+ * pi-senior-review — Pi extension
  *
  * After each agent turn that modifies files, spawns a fresh pi instance
  * to do a code review. Feeds the review feedback back to the main agent
  * as a steering message so it can decide whether to fix anything.
  *
- * Configuration (optional, in cwd/.autoreview/ or ~/.pi/.autoreview/, local takes precedence):
+ * Configuration (optional, in cwd/.senior-review/ or ~/.pi/.senior-review/, local takes precedence):
  *   settings.json       — { "maxReviewLoops": 100, "toggleShortcut": "alt+r", "cancelShortcut": "alt+x" }
  *   review-rules.md     — custom review rules appended to prompt
  *
  * UX:
- *   - Status bar shows auto-review on/off + pending file count
+ *   - Status bar shows senior review on/off + pending file count
  *   - Alt+R toggles review on/off (configurable: toggleShortcut)
  *   - Alt+X or /cancel-review cancels an in-progress review (cancelShortcut configurable, default: none)
  *   - Ctrl+Alt+R also cancels (terminals that support it)
  *   - /review command toggles, /review <N> reviews last N commits
  *
  * Install:
- *   pi install npm:@inceptionstack/pi-autoreview
- *   or: cp index.ts ~/.pi/agent/extensions/pi-autoreview.ts
+ *   pi install npm:@inceptionstack/pi-senior-review
+ *   or: cp index.ts ~/.pi/agent/extensions/pi-senior-review.ts
  */
 
 import { createHash } from "node:crypto";
@@ -147,7 +147,7 @@ export default function (pi: ExtensionAPI) {
   function updateStatus(ctx: { ui: any; hasUI?: boolean }, activity?: string) {
     if (!ctx.hasUI || !ctx.ui) return;
     const theme = ctx.ui.theme;
-    const label = theme.fg("accent", "auto-review");
+    const label = theme.fg("accent", "senior-review");
     const state = reviewEnabled ? theme.fg("success", "on") : theme.fg("dim", "off");
 
     if (isReviewing) {
@@ -224,7 +224,7 @@ export default function (pi: ExtensionAPI) {
         roundupDone = false;
         sessionChangeSummaries = [];
         sessionChangedFiles = new Set();
-        if (ctx.hasUI) ctx.ui.notify(`Auto-review: on`, "info");
+        if (ctx.hasUI) ctx.ui.notify(`Senior review: on`, "info");
         // Only prompt to review if agent is idle and there are pending files.
         // If agent is mid-turn, silently enable — review triggers at next agent_end.
         const idle = ctx.isIdle?.() ?? true;
@@ -232,7 +232,7 @@ export default function (pi: ExtensionAPI) {
           const count = modifiedFiles.size;
           const ok = await ctx.ui.confirm(
             "Run review now?",
-            `${count} file${count > 1 ? "s" : ""} changed while auto-review was off. Review them now?`,
+            `${count} file${count > 1 ? "s" : ""} changed while senior review was off. Review them now?`,
             { timeout: 30000 },
           );
           if (ok) {
@@ -295,11 +295,11 @@ export default function (pi: ExtensionAPI) {
               }
             } catch (err: any) {
               if (err?.message === "Review cancelled") {
-                ctx.ui.notify("Auto-review cancelled", "info");
+                ctx.ui.notify("Senior review cancelled", "info");
               } else {
                 const errMsg = err?.message ?? String(err);
                 log(`ERROR: Review failed: ${errMsg}`);
-                ctx.ui.notify(`Auto-review error: ${errMsg.slice(0, 200)}`, "error");
+                ctx.ui.notify(`Senior review error: ${errMsg.slice(0, 200)}`, "error");
               }
             } finally {
               finishReview(ctx);
@@ -311,7 +311,7 @@ export default function (pi: ExtensionAPI) {
           }
         }
       } else {
-        if (ctx.hasUI) ctx.ui.notify(`Auto-review: off`, "info");
+        if (ctx.hasUI) ctx.ui.notify(`Senior review: off`, "info");
       }
       updateStatus(ctx);
     } finally {
@@ -380,7 +380,7 @@ export default function (pi: ExtensionAPI) {
     // Don't interfere if a toggle-review is in progress (confirm dialog open)
     if (isToggling) return;
 
-    // Don't auto-review if the agent was aborted (Esc pressed)
+    // Don't review if the agent was aborted (Esc pressed)
     const messages = (event as any).messages ?? [];
     const lastAssistant = [...messages].reverse().find((m: any) => m.role === "assistant");
     if (lastAssistant?.stopReason === "aborted") {
@@ -399,7 +399,7 @@ export default function (pi: ExtensionAPI) {
     if (reviewLoopCount >= settings.maxReviewLoops) {
       if (ctx.hasUI)
         ctx.ui.notify(
-          `Auto-review: max loops reached (${settings.maxReviewLoops}). Toggle /review to reset.`,
+          `Senior review: max loops reached (${settings.maxReviewLoops}). Toggle /review to reset.`,
           "warning",
         );
       resetTrackingState(ctx);
@@ -563,15 +563,15 @@ export default function (pi: ExtensionAPI) {
       }
     } catch (err: any) {
       if (err?.message === "Review cancelled") {
-        if (ctx.hasUI) ctx.ui.notify("Auto-review cancelled", "info");
+        if (ctx.hasUI) ctx.ui.notify("Senior review cancelled", "info");
       } else {
         const errMsg = err?.message ?? String(err);
         log(`ERROR: Review failed: ${errMsg}`);
-        if (ctx.hasUI) ctx.ui.notify(`Auto-review error: ${errMsg.slice(0, 200)}`, "error");
+        if (ctx.hasUI) ctx.ui.notify(`Senior review error: ${errMsg.slice(0, 200)}`, "error");
         pi.sendMessage(
           {
             customType: "code-review",
-            content: `⚠️ **Auto-review failed**\n\n${errMsg}\n\nThe review could not complete. Check the model configuration in .autoreview/settings.json.`,
+            content: `⚠️ **Senior review failed**\n\n${errMsg}\n\nThe review could not complete. Check the model configuration in .senior-review/settings.json.`,
             display: true,
           },
           { triggerTurn: false, deliverAs: "followUp" },
@@ -589,7 +589,7 @@ export default function (pi: ExtensionAPI) {
     if (isReviewing && reviewAbort) {
       log(`Cancel requested via ${source}`);
       reviewAbort.abort();
-      if (ctx.hasUI) ctx.ui.notify("Auto-review cancelled", "info");
+      if (ctx.hasUI) ctx.ui.notify("Senior review cancelled", "info");
     }
   }
 
@@ -628,7 +628,7 @@ export default function (pi: ExtensionAPI) {
       sessionChangedFiles = new Set();
       clearActivityTimer();
       resetTrackingState(ctx);
-      if (ctx.hasUI) ctx.ui.notify("Auto-review fully reset", "info");
+      if (ctx.hasUI) ctx.ui.notify("Senior review fully reset", "info");
     },
   });
 
@@ -651,10 +651,127 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
+  // ── /scaffold-review-files command ─────────────────
+
+  pi.registerCommand("scaffold-review-files", {
+    description: "Create .senior-review/ config templates in the current project",
+    handler: async (_args, ctx) => {
+      const { mkdirSync, writeFileSync, existsSync } = await import("node:fs");
+      const { join } = await import("node:path");
+
+      const dir = join(ctx.cwd, ".senior-review");
+      mkdirSync(dir, { recursive: true });
+
+      const files: Record<string, string> = {
+        "settings.json": JSON.stringify(
+          {
+            maxReviewLoops: 100,
+            model: "amazon-bedrock/us.anthropic.claude-opus-4-6-v1",
+            thinkingLevel: "off",
+            roundupEnabled: true,
+            reviewTimeoutMs: 120000,
+            toggleShortcut: "alt+r",
+            cancelShortcut: "",
+          },
+          null,
+          2,
+        ),
+        "review-rules.md": `# Project review rules
+
+## Architecture
+
+- All API routes must go through the middleware chain
+- Database access only via the repository layer, never direct queries
+- No business logic in controllers — delegate to services
+
+## Code standards
+
+- All public functions must have JSDoc comments
+- No \`console.log\` in production code — use the logger
+- All API endpoints must validate input with zod schemas
+
+## Security
+
+- No secrets in code — use environment variables
+- All user input must be sanitized before database queries
+- Authentication required on all non-public routes
+`,
+        "roundup.md": `# Roundup review rules
+
+## Architecture coherence
+
+- Verify the module dependency graph has no unexpected cycles
+- Check that layering is respected (e.g. UI → Service → Repository → Database)
+- Flag any god-objects or god-modules that accumulated too many responsibilities
+
+## Cross-cutting concerns
+
+- Error handling strategy consistent across all modules
+- Logging follows the same patterns everywhere
+- Configuration accessed the same way in all files
+
+## Technical debt
+
+- Flag any TODO/FIXME/HACK comments that were added
+- Identify code that was clearly written in haste during fix loops
+- Check for dead code or unused imports that accumulated
+
+## Documentation
+
+- README still accurate after all changes
+- Architecture docs reflect current state
+- Changed public APIs have updated JSDoc/comments
+`,
+        ignore: `# Files to skip during review (gitignore syntax)
+
+# Dependencies & lock files
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Build output
+dist/**
+build/**
+*.min.js
+*.min.css
+
+# Generated files
+*.generated.ts
+*.d.ts
+
+# Snapshots
+*.snap
+`,
+      };
+
+      let created = 0;
+      let skipped = 0;
+      for (const [name, content] of Object.entries(files)) {
+        const path = join(dir, name);
+        if (existsSync(path)) {
+          skipped++;
+          log(`scaffold: skipped ${name} (already exists)`);
+        } else {
+          writeFileSync(path, content);
+          created++;
+          log(`scaffold: created ${name}`);
+        }
+      }
+
+      const msg =
+        created > 0
+          ? `Created ${created} file(s) in .senior-review/${skipped > 0 ? ` (${skipped} already existed)` : ""}`
+          : `All files already exist in .senior-review/`;
+
+      if (ctx.hasUI) ctx.ui.notify(msg, "info");
+      log(`scaffold: ${msg}`);
+    },
+  });
+
   // ── /review command ────────────────────────────────
 
   pi.registerCommand("review", {
-    description: "Toggle auto-review, or '/review <N>' to review last N commits",
+    description: "Toggle senior review, or '/review <N>' to review last N commits",
     handler: async (args, ctx) => {
       const trimmed = (args ?? "").trim();
 
@@ -672,7 +789,7 @@ export default function (pi: ExtensionAPI) {
 
       ctx.ui.notify("Reviewing commits…", "info");
 
-      // Prevent concurrent reviews — cancel any in-progress auto-review
+      // Prevent concurrent reviews — cancel any in-progress senior review
       if (isReviewing && reviewAbort) {
         log("Cancelling in-progress review for /review N");
         reviewAbort.abort();
@@ -795,10 +912,10 @@ export default function (pi: ExtensionAPI) {
     roundupRules = rRules;
     settings = settingsResult.settings;
 
-    if (customRules) log("Loaded custom rules from .autoreview/review-rules.md");
-    if (roundupRules) log("Loaded roundup rules from .autoreview/roundup.md");
+    if (customRules) log("Loaded custom rules from .senior-review/review-rules.md");
+    if (roundupRules) log("Loaded roundup rules from .senior-review/roundup.md");
     if (ignorePatterns)
-      log(`Loaded ${ignorePatterns.length} ignore pattern(s) from .autoreview/ignore`);
+      log(`Loaded ${ignorePatterns.length} ignore pattern(s) from .senior-review/ignore`);
     for (const err of settingsResult.errors) {
       log(err);
       if (ctx.hasUI) ctx.ui.notify(err, "warning");

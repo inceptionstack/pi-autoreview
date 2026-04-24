@@ -1,12 +1,12 @@
 {
-  "name": "@inceptionstack/pi-autoreview",
+  "name": "@inceptionstack/pi-senior-review",
   "version": "0.1.0",
   "type": "module",
-  "description": "Pi extension that auto-reviews code changes after each agent turn",
+  "description": "Pi extension — senior-level code review after every agent turn",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/inceptionstack/pi-autoreview.git"
+    "url": "https://github.com/inceptionstack/pi-senior-review.git"
   },
   "keywords": [
     "pi",

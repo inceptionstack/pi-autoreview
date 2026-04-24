@@ -1,17 +1,17 @@
-# pi-autoreview
+# pi-senior-review
 
 A [pi](https://github.com/badlogic/pi-mono) extension that automatically reviews code changes after each agent turn using a separate pi reviewer instance.
 
 ## Install
 
 ```bash
-pi install npm:@inceptionstack/pi-autoreview
+pi install npm:@inceptionstack/pi-senior-review
 ```
 
 Or manually:
 
 ```bash
-cp index.ts ~/.pi/agent/extensions/pi-autoreview.ts
+cp index.ts ~/.pi/agent/extensions/pi-senior-review.ts
 ```
 
 ## How it works
@@ -63,12 +63,12 @@ The reviewer checks for:
 
 Config files are loaded from two locations. **Local takes precedence over global:**
 
-1. `cwd/.autoreview/` — project-specific config
-2. `~/.pi/.autoreview/` — global defaults
+1. `cwd/.senior-review/` — project-specific config
+2. `~/.pi/.senior-review/` — global defaults
 
 All config files are optional. If missing, sensible defaults are used.
 
-### `.autoreview/settings.json`
+### `.senior-review/settings.json`
 
 ```json
 {
@@ -92,7 +92,7 @@ All config files are optional. If missing, sensible defaults are used.
 | `toggleShortcut`  | string      | `"alt+r"`                                          | Key id for toggling review on/off                  |
 | `cancelShortcut`  | string      | `""` (none)                                        | Key id for cancelling review (opt-in, see below)   |
 
-### `.autoreview/review-rules.md`
+### `.senior-review/review-rules.md`
 
 Custom review rules appended to the reviewer prompt:
 
@@ -105,7 +105,7 @@ Custom review rules appended to the reviewer prompt:
 - No console.log in production code (use logger)
 ```
 
-### `.autoreview/roundup.md`
+### `.senior-review/roundup.md`
 
 Custom rules for the roundup architecture review:
 
@@ -118,7 +118,7 @@ Custom rules for the roundup architecture review:
 - Verify README and architecture docs still accurate
 ```
 
-### `.autoreview/ignore`
+### `.senior-review/ignore`
 
 Gitignore-style patterns to exclude files from review:
 
@@ -136,16 +136,16 @@ src/vendor/**
 
 ### Status bar (bottom of pi)
 
-- `auto-review on (Alt+R toggle)` — idle, no pending files
-- `auto-review on · will review 3 files (Alt+R toggle)` — edits accumulating
-- `auto-review reviewing… [2/100] model-name (/cancel-review)` — reviewer running
-- `auto-review off (Alt+R toggle)` — disabled
+- `senior-review on (Alt+R toggle)` — idle, no pending files
+- `senior-review on · will review 3 files (Alt+R toggle)` — edits accumulating
+- `senior-review reviewing… [2/100] model-name (/cancel-review)` — reviewer running
+- `senior-review off (Alt+R toggle)` — disabled
 
 ### Commands
 
 | Command          | Description                                         |
 | ---------------- | --------------------------------------------------- |
-| `/review`        | Toggle auto-review on/off                           |
+| `/review`        | Toggle senior-review on/off                           |
 | `/review N`      | Review the last N commits                           |
 | `/cancel-review` | Cancel an in-progress review (works during roundup) |
 
@@ -153,7 +153,7 @@ src/vendor/**
 
 | Key                | Default  | Configurable     | Action                                              |
 | ------------------ | -------- | ---------------- | --------------------------------------------------- |
-| Toggle shortcut    | `alt+r`  | `toggleShortcut` | Toggle auto-review on/off                           |
+| Toggle shortcut    | `alt+r`  | `toggleShortcut` | Toggle senior-review on/off                           |
 | Cancel shortcut    | _(none)_ | `cancelShortcut` | Cancel in-progress review                           |
 | `ctrl+alt+r`       | built-in | no               | Cancel review (fallback, terminals that support it) |
 | `ctrl+alt+shift+r` | built-in | no               | Full reset: cancel, reset loops, clear all state    |

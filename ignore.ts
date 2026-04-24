@@ -1,5 +1,5 @@
 /**
- * ignore.ts — .autoreview/ignore pattern matching
+ * ignore.ts — .senior-review/ignore pattern matching
  *
  * Uses gitignore-style patterns:
  *   - Blank lines and lines starting with # are ignored
@@ -18,7 +18,7 @@ import { readConfigFile } from "./settings";
 
 /**
  * Parse an ignore file into a list of patterns.
- * Tries cwd/.autoreview/ first, then ~/.pi/.autoreview/.
+ * Tries cwd/.senior-review/ first, then ~/.pi/.senior-review/.
  */
 export async function loadIgnorePatterns(cwd: string): Promise<string[] | null> {
   try {
@@ -26,7 +26,7 @@ export async function loadIgnorePatterns(cwd: string): Promise<string[] | null> 
     if (content === null) return null;
     return parseIgnoreFile(content);
   } catch (err: any) {
-    log(`Warning: could not read .autoreview/ignore: ${err?.message}`);
+    log(`Warning: could not read .senior-review/ignore: ${err?.message}`);
     return null;
   }
 }
