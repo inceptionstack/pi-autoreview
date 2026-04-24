@@ -331,7 +331,8 @@ export function buildChangeSummary(toolCalls: TrackedToolCall[]): string {
         return `WROTE file: ${tc.input?.path}\n${(tc.input?.content ?? "").slice(0, 3000)}`;
       }
       if (tc.name === "edit") {
-        const edits = tc.input?.edits ?? [];
+        const rawEdits = tc.input?.edits;
+        const edits = Array.isArray(rawEdits) ? rawEdits : [];
         const editSummary = edits
           .map(
             (e: any, i: number) =>
