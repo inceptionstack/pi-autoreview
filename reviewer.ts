@@ -406,6 +406,12 @@ export function sendReviewResult(
   label: string,
   opts?: { showLoopCount?: string; reviewedFiles?: string[] },
 ): void {
+  // If no files were reviewed, silently skip — nothing to report
+  if (opts?.reviewedFiles && opts.reviewedFiles.length === 0) {
+    log(`reviewer: skipping message — zero reviewed files`);
+    return;
+  }
+
   const duration = `${(result.durationMs / 1000).toFixed(1)}s`;
   if (result.isLgtm) {
     log(`reviewer: LGTM (${duration}, tools=${result.toolCalls.length})`);
