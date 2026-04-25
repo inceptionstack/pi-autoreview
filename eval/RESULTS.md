@@ -5,6 +5,12 @@
 **Wall clock:** 228s (≈4 min)
 **Scope:** 35 fixtures × 3 models × 3 repeats = **315 calls**
 
+> **Addendum — Run #2 (same day, post-eval-harness fixes):**
+> Re-ran the full eval after fixing metric-reporting bugs (symmetric buckets,
+> percentile clamp, race-window close on the SDK call). **Kill metric held
+> on both runs: zero false-noops across 630 calls total.** Detailed run-#2
+> table below the main section. Recommendation unchanged — Haiku 4.5.
+
 > **Revision note (2026-04-25):** Replayed from the original JSONL with corrected
 > metric code. The original harness summary under-counted some mismatches
 > (False-Mod and False-Unsure had asymmetric conditions that let `expected=unsure,
@@ -95,3 +101,54 @@ Per v2 plan:
 - **Statistical reach**: 315 calls is a smoke test, not proof. The kill-metric pass is encouraging but does not prove <1% false-noop rate. Real confidence comes from shadow-mode production telemetry.
 - **Dev-set only**: Although our fixtures include held-out cases (`ho-*`), the prompt was tuned with all 35 in mind. No prompt iteration happened (v1 passed), so test-set leakage is minimal, but still worth noting.
 - **Single prompt version**: v1 cleared the bar for Haiku 4.5; no iteration attempted. If the bar were tighter (e.g. require Nova Micro to hit 100% on the target scenario), we'd iterate per the v2 plan's prompt-iteration budget.
+
+---
+
+## Run #2 (2026-04-25 17:56 UTC)
+
+**Run ID:** `run-2026-04-25T17-56-26-936Z.jsonl`
+**Wall clock:** 254s (≈4 min)
+**Purpose:** Verify the harness fixes from reviews #1–#6 (symmetric bucketing,
+percentile clamp, `unsub()` in finally, text-snapshot-before-parse) produce
+consistent results.
+
+### Summary
+
+| Model | N | Acc | **False-NoOp** | False-Mod | False-Unsure | JSON valid | p50 | p95 | Errors |
+|---|---|---|---|---|---|---|---|---|---|
+| `us.anthropic.claude-haiku-4-5-20251001-v1:0` | 105 | 99.0% | **0** | 0 | 1 | 99% | 947ms | 1281ms | 1 |
+| `amazon.nova-micro-v1:0` | 105 | 97.1% | **0** | 3 | 0 | 100% | 252ms | 306ms | 0 |
+| `amazon.nova-lite-v1:0` | 105 | 94.3% | **0** | 6 | 0 | 100% | 306ms | 377ms | 0 |
+
+### What changed vs Run #1
+
+- **Haiku 4.5**: 100.0% → 99.0%. One transient Bedrock transport hiccup —
+  the response body was empty. The outer `try/catch` in `run-eval.mjs` set
+  `ok:false, classification:"unsure"`, counted as a safe-direction miss.
+  **This is fail-open working exactly as designed** — in production that
+  request would correctly route to the main reviewer.
+- **Nova Micro**: 96.2% → 97.1% (+1 correct). The 1/3 flip on the target bug
+  case (`git status && echo "---" && git log`) from Run #1 is gone — 3/3
+  correct this run. Sampling noise at temp 0.1, but confirms Nova Micro
+  **can** solve it; just not stably.
+- **Nova Lite**: identical 94.3%. Same 6 `unknown-script → modifying`
+  mismatches (`npm run custom-thing` and `./bin/custom-build`) — this is a
+  learned behavior, not noise. Safe direction; defeats the `unsure` nuance.
+
+### Kill metric across both runs
+
+| Model | Run 1 false-noops | Run 2 false-noops | Combined |
+|---|---|---|---|
+| Haiku 4.5 | 0 / 105 | 0 / 105 | **0 / 210** |
+| Nova Micro | 0 / 105 | 0 / 105 | **0 / 210** |
+| Nova Lite | 0 / 105 | 0 / 105 | **0 / 210** |
+
+**Total: 0 false-noops across 630 calls.**
+
+### Recommendation unchanged: Haiku 4.5
+
+- Two runs × three repeats = 6 chances on the target bug case; all 6 correct.
+- The one Run-#2 error was infrastructure, not model — fail-open handled it.
+- Nova Lite: fine fallback but persistently misses `unsure` on unknown scripts.
+- Nova Micro: ruled out. Run-to-run instability on the key case (2/3 then 3/3)
+  makes it unfit for a classifier whose whole job is being predictable.
