@@ -571,7 +571,10 @@ export async function getContentFromToolCalls(
       if (changed === null) {
         // Not in a git repo — keep using heuristic
         verified.push(f);
-      } else if (changed.has(f) || [...changed].some((c) => f.endsWith(c) || c.endsWith(f))) {
+      } else if (
+        changed.has(f) ||
+        [...changed].some((c) => f === c || f.endsWith("/" + c) || c.endsWith("/" + f))
+      ) {
         // In a git repo AND actually changed
         verified.push(f);
       }

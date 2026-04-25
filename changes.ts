@@ -257,7 +257,8 @@ function isNonModifyingPart(part: string): boolean {
   if (ALLOWED_NAVIGATION.test(part)) return true;
 
   // Any output redirection to a file means the command modifies files
-  if (/[^>]>[^>]|>>/.test(part)) return false;
+  // Exclude fd redirections like 2>&1, 2>/dev/null
+  if (/(?<!\d)>{1,2}[^&]/.test(part)) return false;
 
   // Git VCS read-only operations
   const gitMatch = part.match(/^git(?:\s+-C\s+\S+)?\s+(\w[\w-]*)/);
