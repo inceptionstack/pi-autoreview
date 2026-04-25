@@ -4,6 +4,20 @@
 
 ## Open Issues
 
+### Changelog check in default review rules
+
+**Problem:** Reviewers didn't flag missing or stale changelog entries. User-visible changes could land without a corresponding `CHANGELOG.md` update, which hurts release hygiene and makes upgrade impact hard to judge.
+
+**Fix:** Added a "Documentation & Release Notes" section to `default-review-rules.md` that:
+
+- Asserts a changelog file should exist at the project root (`CHANGELOG.md`, `CHANGES.md`, `HISTORY.md`, or equivalent)
+- Instructs the reviewer to flag missing changelog entries for user-visible changes (features, bug fixes, breaking changes, deprecations)
+- Explicitly excludes internal-only changes (refactors with no behavior change, test-only updates, docs-only, build/tooling) so the reviewer doesn't false-positive on internal commits
+- Flags `package.json` version bumps without a matching changelog entry as a smell
+- Suggests creating a changelog (Keep a Changelog format) if none exists
+
+**Status:** [x] Done
+
 ### Extract PushGuard class from index.ts
 
 **Problem:** The push guard logic (regex matching, command stripping, block reason detection, status bar integration) is inline in index.ts's `tool_call` handler. It mixes concerns: command parsing, review state querying, command mutation, and agent notification.

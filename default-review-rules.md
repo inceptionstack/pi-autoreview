@@ -63,6 +63,15 @@
 - Flag primitive obsession: using raw strings/numbers/booleans where a value object or enum would add safety
 - Orthogonality: modules should be independent — changing one should not require changing others
 
+## Documentation & Release Notes
+
+- A changelog file should exist at the project root (`CHANGELOG.md`, `CHANGES.md`, `HISTORY.md`, or equivalent) documenting user-visible changes
+- When a change modifies user-visible behavior (new feature, bug fix, breaking change, deprecation, notable behavior change), flag if the changelog has not been updated to describe it
+- Changelog entries should be concrete and specific: what changed, why it matters to the user, not just the commit summary
+- Internal-only changes (refactors with no behavior change, test-only updates, documentation-only updates, build/tooling changes) do not require a changelog entry — do not flag these
+- If no changelog file exists at all and the project has user-visible changes accumulating, flag that one should be created (suggest Keep a Changelog format or similar)
+- Version bumps in `package.json` or equivalent without a matching changelog entry are a smell — flag the mismatch
+
 ## Domain-Driven Design
 
 - Ubiquitous language: code names should match domain terminology — flag technical jargon where domain terms exist
