@@ -119,7 +119,7 @@ export default function (pi: ExtensionAPI) {
       cwd,
       model: settings.model,
       thinkingLevel: settings.thinkingLevel,
-      timeoutMs: settings.reviewTimeoutMs,
+      timeoutMs: Math.max(settings.reviewTimeoutMs, filesReviewed.length * 120_000),
       filesReviewed,
       onActivity,
       onToolCall,
