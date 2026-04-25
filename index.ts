@@ -165,8 +165,8 @@ export default function (pi: ExtensionAPI) {
   }
 
   function updateStatus(ctx: { ui: any; hasUI?: boolean }) {
-    // Don't overwrite a temporary skip status message
-    if (skipStatusTimer) return;
+    // Don't overwrite a skip status message unless there's real activity
+    if (skipStatusShowing) return;
     const ui = safeGetUi(ctx);
     if (!ui) return;
     const theme = ui.theme;
@@ -216,7 +216,7 @@ export default function (pi: ExtensionAPI) {
 
   let isToggling = false;
   let fileCapWarned = false;
-  let skipStatusTimer: ReturnType<typeof setTimeout> | undefined;
+  let skipStatusShowing = false;
 
   async function toggleReview(ctx: {
     ui: any;
@@ -268,6 +268,7 @@ export default function (pi: ExtensionAPI) {
         detectedGitRoots,
       );
 
+      skipStatusShowing = false; // Review starting clears skip message
       logRotate(source === "auto" ? "=== review start (auto) ===" : "=== review start ===");
       log("cwd:", ctx.cwd);
       log("gitRoots:", [...allRoots]);
@@ -362,6 +363,7 @@ export default function (pi: ExtensionAPI) {
     pendingArgs.set(event.toolCallId, { name: event.toolName, input: event.args });
 
     if (isFileModifyingTool(event.toolName)) {
+      skipStatusShowing = false; // Real file activity clears skip message
       if (modifiedFiles.size < MAX_TRACKED_FILES) {
         if (event.args?.path) modifiedFiles.add(event.args.path);
         else modifiedFiles.add("(bash file op)");
@@ -439,14 +441,8 @@ export default function (pi: ExtensionAPI) {
                     ? "no new changes"
                     : null;
           if (reason) {
+            skipStatusShowing = true;
             ui.setStatus("code-review", `${label} ${theme.fg("dim", `skipped — ${reason}`)}`);
-            // Prevent finishReview's updateStatus from overwriting immediately.
-            // After 3s, clear the flag and restore normal status.
-            if (skipStatusTimer) clearTimeout(skipStatusTimer);
-            skipStatusTimer = setTimeout(() => {
-              skipStatusTimer = undefined;
-              updateStatus(ctx);
-            }, 3000);
           }
         }
         return;
@@ -570,10 +566,7 @@ export default function (pi: ExtensionAPI) {
       manualReviews?.cancel();
       orchestrator.reset();
       detectedGitRoots.clear(); // full reset clears session-level state too
-      if (skipStatusTimer) {
-        clearTimeout(skipStatusTimer);
-        skipStatusTimer = undefined;
-      }
+      if (skipStatusShowing) skipStatusShowing = false;
       if (reviewDisplay) {
         reviewDisplay.stop();
         reviewDisplay = null;
@@ -661,10 +654,7 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_shutdown", async () => {
     manualReviews?.cancel();
     orchestrator.cancel();
-    if (skipStatusTimer) {
-      clearTimeout(skipStatusTimer);
-      skipStatusTimer = undefined;
-    }
+    if (skipStatusShowing) skipStatusShowing = false;
     if (reviewDisplay) {
       reviewDisplay.stop();
       reviewDisplay = null;
