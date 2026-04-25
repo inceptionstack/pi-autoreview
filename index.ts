@@ -430,6 +430,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("tool_call", async (event, _ctx) => {
     if (!isToolCallEventType("bash", event)) return;
+    if (!orchestrator.isEnabled) return; // Review disabled — don't block pushes
     const cmd = event.input.command ?? "";
     if (!/\bgit(?:\s+-C\s+\S+)?\s+push\b/.test(cmd)) return;
 
