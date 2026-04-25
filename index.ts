@@ -21,7 +21,7 @@
  *   or: cp index.ts ~/.pi/agent/extensions/pi-senior-review.ts
  */
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { type ExtensionAPI, isToolCallEventType } from "@mariozechner/pi-coding-agent";
 
 import {
   type AutoReviewSettings,
@@ -409,6 +409,30 @@ export default function (pi: ExtensionAPI) {
             .slice(0, 2000)
         : undefined,
     });
+  });
+
+  // ── Push guard: block git push when review has unresolved issues ──
+
+  pi.on("tool_call", async (event, _ctx) => {
+    if (!isToolCallEventType("bash", event)) return;
+    const cmd = event.input.command ?? "";
+    if (!/\bgit(?:\s+-C\s+\S+)?\s+push\b/.test(cmd)) return;
+
+    if (orchestrator.isReviewing) {
+      return {
+        block: true,
+        reason:
+          "Push blocked: a code review is in progress. Wait for the review to complete before pushing.",
+      };
+    }
+
+    if (orchestrator.lastHadIssues) {
+      return {
+        block: true,
+        reason:
+          "Push blocked: the last code review found issues that haven't been resolved yet. Fix the issues and get LGTM before pushing.",
+      };
+    }
   });
 
   pi.on("before_agent_start", async (event) => {
