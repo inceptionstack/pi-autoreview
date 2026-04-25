@@ -34,38 +34,32 @@ pi-senior-review is a pi extension that provides automated code review after eve
 All arrows mean "imports from". No circular dependencies exist.
 
 ```
-                         index.ts
-                      (orchestrator)
-                     /   |   |  |  \   \
-                    /    |   |  |   \   \
-                   ▼     ▼   ▼  ▼    ▼   ▼
-          settings.ts  prompt.ts  reviewer.ts  review-display.ts  scaffold.ts
-               |              |        |
-               |              |        ▼
-               |              |    logger.ts
-               ▼              |
-           (node:fs)          |
-                              ▼
-                          (pi SDK)
-
-        context.ts ──────► helpers.ts
-            │
-            ├──────────► ignore.ts ──► settings.ts (readConfigFile)
+                    index.ts (pi wiring, UI, renderOutcome)
+                   /    |     |     \      \
+                  ▼     ▼     ▼      ▼      ▼
+      orchestrator.ts  commands.ts  message-sender.ts  review-display.ts
+           |               |              |
+           ├── reviewer.ts (injected)     ├── reviewer.ts (types)
+           ├── context.ts  (injected)     └── logger.ts
+           ├── architect.ts
+           ├── prompt.ts               commands.ts
+           ├── changes.ts                  ├── reviewer.ts (direct)
+           └── logger.ts                   ├── context.ts
+                                           ├── prompt.ts
+        context.ts ──────► helpers.ts      ├── ignore.ts
+            │                              └── scaffold.ts
+            ├──────────► ignore.ts
             │
             ├──────────► changes.ts
             │
             └──────────► logger.ts
 
-        architect.ts ──► reviewer.ts
-            │
-            └──────────► settings.ts (readConfigFile)
+        architect.ts ──► settings.ts (readConfigFile)
 
         git-roots.ts ──► (pi SDK)
 
         changes.ts ──── (standalone, no local imports)
-
         helpers.ts ──── (standalone, no local imports)
-
         logger.ts ───── (standalone, only node:fs + node:path + node:os)
 ```
 
@@ -185,48 +179,56 @@ The review prompt has a fixed 3-part structure:
 └──────────────────────────────────────────────┘
 ```
 
-### 5. Review loop (index.ts)
+### 5. Review loop (orchestrator.ts + index.ts)
 
 ```
 agent modifies files
        │
        ▼
-  agent_end fires
+  agent_end fires (index.ts)
        │
-       ├── reviewEnabled? ── no → track files, update status
-       │
-       ├── maxReviewLoops reached? ── yes → warn, stop
-       │
-       ├── hasFileChanges? ── no → skip
-       │
-       ├── isFormattingOnlyTurn? ── yes → skip (prettier/eslint --fix/etc.)
+       ├── aborted? disabled? → skip, update status
        │
        ▼
-  Build review content
+  orchestrator.handleAgentEnd(input)
        │
-       ├── content too small? → skip
-       ├── same hash as last review? → skip (avoid re-reviewing identical content)
+       ├── reviewEnabled? ── no → { type: "skipped" }
+       ├── maxReviewLoops? ── yes → { type: "max_loops" }
+       ├── hasFileChanges? ── no → { type: "skipped" }
+       ├── formattingOnly? ── yes → { type: "skipped" }
+       ├── no real files?  ── yes → { type: "skipped" }
        │
        ▼
-  Run review session
+  Build content (injected ContentBuilder)
        │
-       ├── Context overflow? → retry with FALLBACK_LIMITS (smaller diffs)
+       ├── null / too small? → { type: "skipped" }
+       ├── same hash? → { type: "skipped", reason: "duplicate_content" }
+       │
+       ▼
+  Run senior review (injected ReviewRunner)
+       │
+       ├── Context overflow? → retry with FALLBACK_LIMITS
        │
        ▼
   Parse result
        │
-       ├── LGTM → reset loop counter
+       ├── LGTM → reset loop counter → check architect
        │     │
-       │     ├── architectEnabled && >1 file && git-based?
-       │     │     yes → run architect review (architect.ts)
-       │     │     no  → done
+       │     ├── >1 file && git-based → run architect
+       │     │     → { type: "completed", senior: LGTM, architect: result }
        │     │
-       │     └── sendMessage(LGTM) → triggers agent turn (for any user notification)
+       │     └── no architect → { type: "completed", senior: LGTM }
        │
-       └── ISSUES_FOUND → sendMessage(issues) → triggers agent turn
-             Agent sees review feedback, makes fixes
-             agent_end fires again → new review cycle
-             (up to maxReviewLoops)
+       └── ISSUES_FOUND → { type: "completed", senior: issues }
+       │
+       ▼
+  renderOutcome(outcome) in index.ts
+       │
+       ├── completed + no architect → sendMessage(senior, triggerTurn: true)
+       ├── completed + architect → sendMessage(senior, triggerTurn: false)
+       │                          sendMessage(architect, triggerTurn: true)
+       ├── error → sendMessage(error)
+       └── skipped/cancelled/max_loops → UI notification only
 ```
 
 ## Configuration system (settings.ts)

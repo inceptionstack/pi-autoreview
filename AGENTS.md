@@ -8,21 +8,24 @@ A [pi](https://github.com/badlogic/pi-mono) extension that automatically reviews
 
 ```
 pi-senior-review/
-├── index.ts              ← Extension entry point & orchestration (~1300 lines)
-├── settings.ts           ← Config loading from .senior-review/ dirs
-├── prompt.ts             ← Review prompt construction (3-part structure)
+├── index.ts              ← Extension entry point, pi wiring, UI (~590 lines)
+├── orchestrator.ts       ← Auto-review state machine & sequencing (~335 lines)
+├── commands.ts           ← Manual review commands (/review N, /review-all, etc.)
 ├── reviewer.ts           ← Spawns pi session, runs review, parses verdict
-├── changes.ts            ← Change detection, tool call classification
+├── message-sender.ts     ← sendReviewResult — formats & sends review messages
 ├── context.ts            ← Builds review content (4 fallback paths)
+├── changes.ts            ← Change detection, tool call classification
+├── prompt.ts             ← Review prompt construction (3-part structure)
+├── architect.ts          ← Architect prompt + shouldRunArchitectReview
+├── settings.ts           ← Config loading from .senior-review/ dirs
 ├── ignore.ts             ← Gitignore-style pattern matching
-├── architect.ts          ← Architecture-level "zoom out" review
 ├── git-roots.ts          ← Multi-repo git root detection
 ├── helpers.ts            ← Pure utility functions
 ├── logger.ts             ← File logger + structured JSON review records
 ├── review-display.ts     ← TUI widget (ASCII art + file progress)
 ├── scaffold.ts           ← Template content for /scaffold-review-files
 ├── default-review-rules.md ← Default review criteria (OWASP, SOLID, DRY, etc.)
-├── test/                 ← 248 tests across 9 files (vitest)
+├── test/                 ← 267 tests across 10 files (vitest)
 └── .senior-review/       ← Local config (settings.json, review-rules.md, etc.)
 ```
 
@@ -48,6 +51,7 @@ npm run format:check   # Prettier check
 - **Formatting:** Prettier
 - **Dependency:** `@mariozechner/pi-coding-agent` (peer dep — the pi SDK)
 - **No runtime dependencies** — only peer dep on the pi SDK
+- **Key design pattern:** Orchestrator returns outcomes, index.ts renders them (clean separation of logic from UI)
 
 ## Git workflow
 
@@ -79,19 +83,28 @@ The review pipeline:
 ## How the modules connect
 
 ```
-index.ts (orchestrator)
+index.ts (pi wiring, UI, renderOutcome)
+  ├── orchestrator.ts  — auto-review state machine (handleAgentEnd → ReviewOutcome)
+  │     ├── reviewer.ts (injected as ReviewRunner function)
+  │     ├── context.ts  (injected as ContentBuilder function)
+  │     ├── architect.ts — prompt + shouldRunArchitectReview
+  │     ├── prompt.ts   — assembles the 3-part review prompt
+  │     └── changes.ts  — skip decisions (hasFileChanges, isFormattingOnlyTurn)
+  ├── commands.ts      — manual review commands (/review N, /review-all, etc.)
+  │     ├── reviewer.ts — runReviewSession (direct call)
+  │     └── context.ts  — buildPerFileContext
+  ├── message-sender.ts — sendReviewResult (formats + sends messages)
   ├── settings.ts      — reads .senior-review/settings.json + review-rules.md
-  ├── changes.ts       — classifies tool calls as file-modifying or not
-  ├── context.ts       — builds review content from git diffs / tool calls
-  │     ├── helpers.ts — truncateDiff, clampCommitCount
-  │     └── ignore.ts  — filters out ignored files
-  ├── prompt.ts        — assembles the 3-part review prompt
-  ├── reviewer.ts      — spawns pi session, runs LLM, parses verdict
-  ├── architect.ts     — runs architecture-level review after LGTM
   ├── git-roots.ts     — finds git repo roots from file paths
   ├── review-display.ts — animated TUI widget during review
   ├── scaffold.ts      — templates for /scaffold-review-files command
   └── logger.ts        — file logging + structured JSON records
+
+context.ts (content builder)
+  ├── helpers.ts       — truncateDiff, clampCommitCount
+  ├── ignore.ts        — filters out ignored files
+  ├── changes.ts       — buildChangeSummary, collectModifiedPaths
+  └── logger.ts
 ```
 
 ## Important patterns
@@ -120,9 +133,17 @@ index.ts (orchestrator)
 
 The reviewer must output `<verdict>LGTM</verdict>` or `<verdict>ISSUES_FOUND</verdict>`. If missing, up to 2 retry prompts ask for just the verdict. After retries, defaults to ISSUES_FOUND (safer).
 
+### Orchestrator pattern (orchestrator.ts)
+
+The `ReviewOrchestrator` class owns the auto-review state machine. It:
+
+- Takes injected dependencies (`ReviewRunner` function, `ContentBuilder` function)
+- Returns a `ReviewOutcome` discriminated union — never calls `sendMessage` or touches UI
+- index.ts maps outcomes to messages via `renderOutcome()` with trivial `triggerTurn` logic
+
 ### Architect review (architect.ts)
 
-Triggers automatically when >1 file was reviewed across the session AND content was git-based. No heuristics or judge gating — it always runs for multi-file changes. Checks architecture coherence, cross-file consistency, and accumulated tech debt.
+Triggers automatically when >1 file was reviewed across the session AND content was git-based. No heuristics or judge gating — it always runs for multi-file changes. The orchestrator sequences it after senior LGTM.
 
 ## Testing conventions
 
@@ -130,7 +151,7 @@ Triggers automatically when >1 file was reviewed across the session AND content 
 - Tests use vitest (`describe`, `it`, `expect`)
 - Test names follow descriptive pattern: `functionName > scenario > expected behavior`
 - Pure functions are tested directly; I/O-heavy functions are tested with mocks
-- 248 tests across 9 test files
+- 267 tests across 10 test files (including orchestrator state machine tests)
 
 ## Common modification scenarios
 
