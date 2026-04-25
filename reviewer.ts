@@ -53,6 +53,8 @@ export interface ReviewOptions {
   onToolCall?: (toolName: string, targetPath: string | null) => void;
 }
 
+export type ReviewRunner = (prompt: string, opts: ReviewOptions) => Promise<ReviewResult>;
+
 /** Review text markers that indicate where the actual review findings start. */
 const REVIEW_MARKERS = [
   /\n##\s*Review/i,

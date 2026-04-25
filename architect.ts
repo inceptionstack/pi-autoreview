@@ -9,7 +9,7 @@
  * accumulated tech debt, and documentation accuracy.
  */
 
-import { runReviewSession, type ReviewResult } from "./reviewer";
+import type { ReviewResult, ReviewRunner } from "./reviewer";
 import { readConfigFile } from "./settings";
 import { log } from "./logger";
 
@@ -106,10 +106,13 @@ export interface ArchitectReviewOptions {
 /**
  * Run the final architect review.
  */
-export async function runArchitectReview(opts: ArchitectReviewOptions): Promise<ReviewResult> {
+export async function runArchitectReview(
+  runner: ReviewRunner,
+  opts: ArchitectReviewOptions,
+): Promise<ReviewResult> {
   const prompt = `${buildArchitectPrompt(opts.customRules)}\n\n---\n\nHere is a summary of all changes made in this session:\n\n${opts.sessionChangeSummary}\n\nPlease explore the codebase with your tools to verify everything fits together.`;
 
-  return await runReviewSession(prompt, {
+  return await runner(prompt, {
     signal: opts.signal,
     cwd: opts.cwd,
     model: opts.model,

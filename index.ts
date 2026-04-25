@@ -631,7 +631,7 @@ export default function (pi: ExtensionAPI) {
 
           try {
             const summaryText = sessionChangeSummaries.join("\n\n---\n\n");
-            const architectResult = await runArchitectReview({
+            const architectResult = await runArchitectReview(runReviewSession, {
               signal: reviewAbort!.signal,
               cwd: ctx.cwd,
               model: settings.model,
