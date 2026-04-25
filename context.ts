@@ -15,6 +15,7 @@ import {
   buildChangeSummary,
   collectModifiedPaths,
   isBinaryPath,
+  hasGitCommitCommand,
 } from "./changes";
 
 export interface ReviewContext {
@@ -191,13 +192,21 @@ export async function getContentFromGitRoots(
   summarySection: string,
   onStatus?: (msg: string) => void,
   limits?: ContentSizeLimits,
+  allowLastCommitFallback = false,
 ): Promise<ReviewContent | null> {
   const allContexts: string[] = [];
   const allFiles: string[] = [];
 
   for (const root of gitRoots) {
     onStatus?.(`checking ${root}…`);
-    const repoContext = await buildRepoContext(pi, root, ignorePatterns, onStatus, limits);
+    const repoContext = await buildRepoContext(
+      pi,
+      root,
+      ignorePatterns,
+      onStatus,
+      limits,
+      allowLastCommitFallback,
+    );
     if (!repoContext) continue;
 
     allFiles.push(...repoContext.files.map((f) => `${root}/${f}`));
@@ -225,6 +234,7 @@ async function buildRepoContext(
   ignorePatterns: string[] | undefined,
   onStatus?: (msg: string) => void,
   limits?: ContentSizeLimits,
+  allowLastCommitFallback = false,
 ): Promise<{ text: string; files: string[] } | null> {
   const lim = limits ?? LARGE_LIMITS;
   let diff = "";
@@ -251,8 +261,8 @@ async function buildRepoContext(
     // No tracked changes but we have untracked files — use those directly
     // (don't fall through to last-commit which would review stale files)
     files = [...untracked];
-  } else {
-    // No uncommitted changes AND no untracked files — fall back to last commit
+  } else if (allowLastCommitFallback) {
+    // Clean tree after an agent-created commit: review the commit.
     const lastResult = await pi.exec("git", ["-C", root, "diff", "HEAD~1", "HEAD"], {
       timeout: 15000,
     });
@@ -550,6 +560,8 @@ export async function getBestReviewContent(
 
   const { summarySection, changeSummary } = buildSummarySection(agentToolCalls);
 
+  const allowLastCommitFallback = hasGitCommitCommand(agentToolCalls);
+
   if (gitRoots && gitRoots.size > 0) {
     const result = await getContentFromGitRoots(
       pi,
@@ -558,6 +570,7 @@ export async function getBestReviewContent(
       summarySection,
       onStatus,
       lim,
+      allowLastCommitFallback,
     );
     if (result) return result;
   }
@@ -565,14 +578,16 @@ export async function getBestReviewContent(
   const cwdResult = await getContentFromCwd(pi, ignorePatterns, summarySection, onStatus, lim);
   if (cwdResult) return cwdResult;
 
-  const lastCommitResult = await getContentFromLastCommit(
-    pi,
-    ignorePatterns,
-    summarySection,
-    onStatus,
-    lim,
-  );
-  if (lastCommitResult) return lastCommitResult;
+  if (allowLastCommitFallback) {
+    const lastCommitResult = await getContentFromLastCommit(
+      pi,
+      ignorePatterns,
+      summarySection,
+      onStatus,
+      lim,
+    );
+    if (lastCommitResult) return lastCommitResult;
+  }
 
   return getContentFromToolCalls(pi, agentToolCalls, changeSummary, onStatus, lim);
 }

@@ -126,10 +126,29 @@ function findMatchingFile(files: string[], path: string): string | null {
 
 /**
  * Infer which architecture module a file path belongs to.
- * Uses the first meaningful directory component.
+ * Relativizes absolute paths against cwd first, then uses
+ * the first meaningful directory component.
  */
 function inferModuleFromPath(filePath: string): string | null {
-  const parts = filePath.replace(/^\/+/, "").split("/");
+  // Relativize absolute paths so we don't get "home" as a module
+  let normalized = filePath;
+  if (normalized.startsWith("/")) {
+    try {
+      const cwd = process.cwd();
+      if (normalized.startsWith(cwd + "/")) {
+        normalized = normalized.slice(cwd.length + 1);
+      } else {
+        // Not under cwd — use last 3 path segments as a reasonable scope
+        const segs = normalized.split("/").filter(Boolean);
+        normalized = segs.slice(-3).join("/");
+      }
+    } catch {
+      // process.cwd() can fail in edge cases
+      const segs = normalized.split("/").filter(Boolean);
+      normalized = segs.slice(-3).join("/");
+    }
+  }
+  const parts = normalized.split("/");
   // Skip common root dirs
   const skip = new Set(["src", "lib", "app", "packages", "."]);
   for (const p of parts.slice(0, -1)) {
@@ -384,8 +403,16 @@ export function startReviewDisplay(
   let timer: ReturnType<typeof setInterval> | undefined;
 
   function redraw() {
-    const lines = buildReviewWidget(state, animFrame, spinnerFrame, boundTheme);
-    boundSetWidget("senior-review-progress", lines, { placement: "belowEditor" });
+    try {
+      const lines = buildReviewWidget(state, animFrame, spinnerFrame, boundTheme);
+      boundSetWidget("senior-review-progress", lines, { placement: "belowEditor" });
+    } catch {
+      // UI may be stale after session replacement — stop silently
+      if (timer) {
+        clearInterval(timer);
+        timer = undefined;
+      }
+    }
   }
 
   // Animate: tick every 150ms for spinner, toggle senior art every ~600ms
@@ -469,7 +496,11 @@ export function startReviewDisplay(
         clearInterval(timer);
         timer = undefined;
       }
-      boundSetWidget("senior-review-progress", undefined);
+      try {
+        boundSetWidget("senior-review-progress", undefined);
+      } catch {
+        // UI may be stale — ignore
+      }
     },
   };
 }

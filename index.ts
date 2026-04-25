@@ -155,9 +155,19 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
+  /** Safely access ctx.ui, returning null if the context is stale. */
+  function safeGetUi(ctx: { ui: any; hasUI?: boolean }): any | null {
+    try {
+      return ctx.hasUI ? ctx.ui : null;
+    } catch {
+      return null;
+    }
+  }
+
   function updateStatus(ctx: { ui: any; hasUI?: boolean }) {
-    if (!ctx.hasUI || !ctx.ui) return;
-    const theme = ctx.ui.theme;
+    const ui = safeGetUi(ctx);
+    if (!ui) return;
+    const theme = ui.theme;
     const label = theme.fg("accent", "senior-review");
     const state = orchestrator.isEnabled ? theme.fg("success", "on") : theme.fg("dim", "off");
 
@@ -165,7 +175,7 @@ export default function (pi: ExtensionAPI) {
       const cancelHint = shortcutConfig.cancelShortcut
         ? `${shortcutConfig.cancelShortcut} or /cancel-review`
         : "/cancel-review";
-      ctx.ui.setStatus(
+      ui.setStatus(
         "code-review",
         `${label} ${theme.fg("warning", "reviewing…")} ${theme.fg("dim", `(${cancelHint})`)}`,
       );
@@ -185,7 +195,7 @@ export default function (pi: ExtensionAPI) {
         const issueIndicator = orchestrator.lastHadIssues
           ? ` ${theme.fg("error", "issues found")}`
           : "";
-        ctx.ui.setStatus(
+        ui.setStatus(
           "code-review",
           `${label} ${state}${issueIndicator} · ${verb} ${theme.fg("accent", String(count))} ${theme.fg("muted", count === 1 ? "file" : "files")} ${theme.fg("dim", "(Alt+R toggle)")}`,
         );
@@ -196,7 +206,7 @@ export default function (pi: ExtensionAPI) {
     const issueIndicator = orchestrator.lastHadIssues
       ? ` ${theme.fg("error", "issues found")}`
       : "";
-    ctx.ui.setStatus(
+    ui.setStatus(
       "code-review",
       `${label} ${state}${issueIndicator} ${theme.fg("dim", "(Alt+R toggle)")}`,
     );
@@ -291,11 +301,14 @@ export default function (pi: ExtensionAPI) {
         },
         onArchitectStart: (files) => {
           try {
-            updateStatus(ctx);
             if (!reviewDisplay) return;
+            const ui = safeGetUi(ctx);
+            const uiTheme = ui?.theme;
+            if (!uiTheme?.fg || !uiTheme?.bold) {
+              reviewDisplay.setArchitectMode(files);
+              return;
+            }
             const modules = inferArchModules(files);
-            const uiTheme = ctx.ui?.theme;
-            if (!uiTheme?.fg || !uiTheme?.bold) return;
             const theme = {
               fg: uiTheme.fg.bind(uiTheme) as (c: string, t: string) => string,
               bold: uiTheme.bold.bind(uiTheme) as (t: string) => string,
@@ -421,10 +434,12 @@ export default function (pi: ExtensionAPI) {
       }
       case "completed": {
         const hasArchitect = Boolean(outcome.architect);
+        // LGTM: don't trigger a turn (nothing to fix). ISSUES_FOUND: trigger so agent fixes.
+        const seniorTrigger = !outcome.senior.result.isLgtm && !hasArchitect;
         sendReviewResult(pi, outcome.senior.result, outcome.senior.label ?? "", {
           showLoopCount: outcome.senior.loopInfo,
           reviewedFiles: outcome.files,
-          triggerTurn: !hasArchitect,
+          triggerTurn: seniorTrigger,
         });
 
         if (!outcome.architect) return;
@@ -437,7 +452,7 @@ export default function (pi: ExtensionAPI) {
               content: `🏗️ **Architect Review**\n\nFinal architecture review found no issues. Everything fits together.\n\nIf you were waiting to push until after reviews were done — all reviews are done, no issues found. Safe to push.`,
               display: true,
             },
-            { triggerTurn: true, deliverAs: "followUp" },
+            { triggerTurn: false, deliverAs: "followUp" },
           );
         } else {
           pi.sendMessage(

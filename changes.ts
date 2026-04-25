@@ -316,6 +316,18 @@ export function collectModifiedPaths(toolCalls: TrackedToolCall[]): string[] {
 export { MAX_NON_GIT_FILE_SIZE };
 
 /**
+ * Check if the agent ran `git commit` during this turn.
+ * Used to gate last-commit fallback in auto-review content gathering.
+ */
+export function hasGitCommitCommand(toolCalls: TrackedToolCall[]): boolean {
+  return toolCalls.some((tc) => {
+    if (tc.name !== "bash") return false;
+    const cmd = String(tc.input?.command ?? "");
+    return /\bgit(?:\s+-C\s+\S+)?\s+commit\b/.test(cmd);
+  });
+}
+
+/**
  * Build a human-readable summary of file changes from tool calls.
  */
 export function buildChangeSummary(toolCalls: TrackedToolCall[]): string {

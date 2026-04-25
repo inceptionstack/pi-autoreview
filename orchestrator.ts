@@ -206,9 +206,13 @@ export class ReviewOrchestrator {
         this.loopCount = 0;
 
         const architect = await this.runArchitectIfNeeded(input);
-        return architect
-          ? { type: "completed", senior, architect, files: best.files }
-          : { type: "completed", senior, files: best.files };
+        if (architect) {
+          return { type: "completed", senior, architect, files: best.files };
+        }
+        // No architect ran — clear session accumulators so stale files
+        // from this cycle don't leak into a future unrelated cycle.
+        this.resetCycleState();
+        return { type: "completed", senior, files: best.files };
       }
 
       this.peakReviewLoopCount = Math.max(this.peakReviewLoopCount, this.loopCount);
