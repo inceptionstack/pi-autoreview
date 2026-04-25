@@ -4,24 +4,6 @@
 
 ## Open Issues
 
-### Smart roundup: LLM-as-judge gate for architecture reviews
-
-**Goal:** Roundup reviews are valuable after refactorings and cross-cutting changes, but waste time on trivial single-file fixes. Gate roundup with cheap heuristics + a fast LLM judge call.
-**Design:**
-
-1. After LGTM, check cheap heuristics first (skip immediately if obviously not needed):
-   - < 3 files changed across the session → skip
-   - Only test files changed → skip
-   - peakReviewLoopCount === 0 (first-pass LGTM, no fix loops) → skip
-2. If heuristics say "maybe", run a **quick judge call** (~2-5s, small context):
-   - Feed: file list, git log (recent commits), change summary snippets
-   - Ask: "Does this warrant a broader architecture review? YES/NO + one sentence."
-   - Reuse `runReviewSession` with tight timeout (20s), maps verdict: ISSUES_FOUND=yes, LGTM=no
-3. If judge says YES → run full roundup automatically (unattended)
-4. `/cancel-review` cancels both judge and roundup (shared abort signal) ✓
-   **Config:** `roundupEnabled: true` by default
-   **Status:** [ ]
-
 ### B3. `buildRepoContext` ignores agent-modified file list — reviews wrong files
 
 **Problem:** When agent creates new (untracked) files via `write`, `buildRepoContext` runs `git diff HEAD` on the entire repo. If the working tree has no staged/modified _tracked_ files, the diff is empty and the code falls through to the `git diff HEAD~1 HEAD` (last commit) branch. This branch always has content, so it "succeeds" — but it reviews the _last commit's_ files instead of the untracked files the agent just created.
@@ -111,7 +93,7 @@
 
 ## Tests
 
-### Current: 267 tests (10 files)
+### Current: 274 tests (10 files)
 
 | File                        | Tests | Coverage                                                       |
 | --------------------------- | ----- | -------------------------------------------------------------- |
