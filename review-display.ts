@@ -13,7 +13,10 @@
 // Two frames for a subtle animation (alternating the eyes/glasses).
 
 function buildArtFrames(label: string): string[][] {
-  const padded = label.length > 8 ? label.slice(0, 8) : label.padStart(Math.floor((8 + label.length) / 2)).padEnd(8);
+  const padded =
+    label.length > 8
+      ? label.slice(0, 8)
+      : label.padStart(Math.floor((8 + label.length) / 2)).padEnd(8);
   return [
     [
       `    ┌─────────┐ `,
@@ -161,7 +164,9 @@ export function buildArchDiagram(
     const topLine = row
       .map((m) => {
         const isActive = m === activeModule;
-        const border = isActive ? "┏" + "━".repeat(boxWidth) + "┓" : "┌" + "─".repeat(boxWidth) + "┐";
+        const border = isActive
+          ? "┏" + "━".repeat(boxWidth) + "┓"
+          : "┌" + "─".repeat(boxWidth) + "┐";
         return isActive ? theme.fg("warning", border) : theme.fg("dim", border);
       })
       .join(" ");
@@ -172,9 +177,15 @@ export function buildArchDiagram(
       .map((m) => {
         const isActive = m === activeModule;
         const label = m.length > boxWidth - 2 ? m.slice(0, boxWidth - 3) + "…" : m;
-        const padded = label.padStart(Math.floor((boxWidth - label.length) / 2) + label.length).padEnd(boxWidth);
+        const padded = label
+          .padStart(Math.floor((boxWidth - label.length) / 2) + label.length)
+          .padEnd(boxWidth);
         if (isActive) {
-          return theme.fg("warning", "┃") + theme.fg("warning", theme.bold(padded)) + theme.fg("warning", "┃");
+          return (
+            theme.fg("warning", "┃") +
+            theme.fg("warning", theme.bold(padded)) +
+            theme.fg("warning", "┃")
+          );
         }
         return theme.fg("dim", "│") + theme.fg("muted", padded) + theme.fg("dim", "│");
       })
@@ -185,7 +196,9 @@ export function buildArchDiagram(
     const botLine = row
       .map((m) => {
         const isActive = m === activeModule;
-        const border = isActive ? "┗" + "━".repeat(boxWidth) + "┛" : "└" + "─".repeat(boxWidth) + "┘";
+        const border = isActive
+          ? "┗" + "━".repeat(boxWidth) + "┛"
+          : "└" + "─".repeat(boxWidth) + "┘";
         return isActive ? theme.fg("warning", border) : theme.fg("dim", border);
       })
       .join(" ");
@@ -193,7 +206,14 @@ export function buildArchDiagram(
 
     // Connection arrows between rows
     if (i + cols < modules.length) {
-      const arrowLine = row.map(() => " ".repeat(Math.floor(boxWidth / 2)) + theme.fg("dim", "│") + " ".repeat(Math.ceil(boxWidth / 2))).join(" ");
+      const arrowLine = row
+        .map(
+          () =>
+            " ".repeat(Math.floor(boxWidth / 2)) +
+            theme.fg("dim", "│") +
+            " ".repeat(Math.ceil(boxWidth / 2)),
+        )
+        .join(" ");
       lines.push(arrowLine);
     }
   }
@@ -241,9 +261,8 @@ export function buildReviewWidget(
   const infoLines: string[] = [];
   const elapsed = ((Date.now() - state.startTime) / 1000).toFixed(0);
   const modelShort = (state.model || "").split("/").pop() ?? "";
-  const toolInfo = state.totalToolCalls > 0
-    ? theme.fg("dim", ` tools: ${state.totalToolCalls}`)
-    : "";
+  const toolInfo =
+    state.totalToolCalls > 0 ? theme.fg("dim", ` tools: ${state.totalToolCalls}`) : "";
   const reviewType = state.isArchitect ? "Architect Review" : "Reviewing";
 
   infoLines.push(
@@ -269,18 +288,17 @@ export function buildReviewWidget(
       const shortPath = f.split("/").slice(-3).join("/");
       const count = state.toolCounts.get(f) ?? 0;
       const lastDesc = state.lastToolDesc.get(f) ?? "";
-      const toolTag = count > 0
-        ? theme.fg("dim", ` [${count}]`) + (lastDesc ? theme.fg("dim", ` ${lastDesc}`) : "")
-        : "";
+      const toolTag =
+        count > 0
+          ? theme.fg("dim", ` [${count}]`) + (lastDesc ? theme.fg("dim", ` ${lastDesc}`) : "")
+          : "";
 
       if (f === state.activeFile) {
         infoLines.push(
           `  ${theme.fg("accent", "▸")} ${theme.fg("warning", shortPath)}${toolTag} ${theme.fg("warning", "← reviewing")}`,
         );
       } else if (count > 0) {
-        infoLines.push(
-          `  ${theme.fg("success", "✓")} ${theme.fg("muted", shortPath)}${toolTag}`,
-        );
+        infoLines.push(`  ${theme.fg("success", "✓")} ${theme.fg("muted", shortPath)}${toolTag}`);
       } else {
         infoLines.push(`  ${theme.fg("dim", "·")} ${theme.fg("muted", shortPath)}`);
       }
@@ -345,7 +363,8 @@ export function startReviewDisplay(
     spinnerFrame = (spinnerFrame + 1) % SPINNER_FRAMES.length;
     tickCount++;
     if (tickCount % 4 === 0) {
-      animFrame = (animFrame + 1) % (state.isArchitect ? ARCHITECT_FRAMES.length : SENIOR_FRAMES.length);
+      animFrame =
+        (animFrame + 1) % (state.isArchitect ? ARCHITECT_FRAMES.length : SENIOR_FRAMES.length);
     }
     redraw();
   }, 150);

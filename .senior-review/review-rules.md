@@ -1,4 +1,5 @@
 - Code should use Clean Code rules and DRY principles. Do not repeat yourself.
+
 ## Correctness & Bugs
 
 - **Off-by-one errors**: wrong loop bounds (< vs <=, 0-indexed vs 1-indexed), fence-post errors in slicing/substring, incorrect range endpoints

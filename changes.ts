@@ -245,7 +245,6 @@ export function isNonFileModifyingCommand(command: string): boolean {
   return parts.every(isNonModifyingPart);
 }
 
-
 /**
  * Check if any tool calls include file modifications.
  * Bash commands count UNLESS they are known non-modifying (git VCS ops, API calls, etc.)

@@ -242,9 +242,12 @@ export async function runReviewSession(prompt: string, opts: ReviewOptions): Pro
       log(`reviewer tool: ${activity}`);
       opts.onActivity?.(activity);
       // Emit structured tool call for display widget
-      const targetPath = name === "read" ? (args?.path ?? null)
-        : (name === "bash") ? (args?.command ?? null)
-        : (args?.path ?? args?.pattern ?? null);
+      const targetPath =
+        name === "read"
+          ? (args?.path ?? null)
+          : name === "bash"
+            ? (args?.command ?? null)
+            : (args?.path ?? args?.pattern ?? null);
       opts.onToolCall?.(name, targetPath);
     }
     if (ev.type === "tool_execution_end") {
@@ -257,6 +260,7 @@ export async function runReviewSession(prompt: string, opts: ReviewOptions): Pro
   async function sendPrompt(text: string, timeoutMs: number): Promise<void> {
     await new Promise<void>((resolve, reject) => {
       let settled = false;
+      // eslint-disable-next-line prefer-const
       let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
       const onAbort = () => {

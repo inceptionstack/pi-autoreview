@@ -55,9 +55,8 @@ export async function buildReviewContext(
   pi: ExtensionAPI,
   onStatus?: (msg: string) => void,
   ignorePatterns?: string[],
-  limits?: ContentSizeLimits,
+  _limits?: ContentSizeLimits,
 ): Promise<ReviewContext | null> {
-  const lim = limits ?? LARGE_LIMITS;
   onStatus?.("getting diff…");
 
   const fullDiffResult = await pi.exec("git", ["diff", "HEAD"], { timeout: 15000 });
@@ -142,7 +141,9 @@ export function formatReviewContext(ctx: ReviewContext, limits?: ContentSizeLimi
   }
 
   parts.push(`\n## Files to review\n`);
-  parts.push(`Read each file with read(path) to see its full contents, then review using the diff below.\n`);
+  parts.push(
+    `Read each file with read(path) to see its full contents, then review using the diff below.\n`,
+  );
   for (const f of ctx.changedFiles) {
     parts.push(`### ${f}\n**Full path:** \`${f}\`\n`);
   }
@@ -278,7 +279,13 @@ async function buildRepoContext(
 
   // Build per-file review context (path, diff, commits — reviewer reads files itself)
   const perFileSections = await buildPerFileContext(
-    pi, root, filteredFiles, diffRange, untrackedFiles, lim, onStatus,
+    pi,
+    root,
+    filteredFiles,
+    diffRange,
+    untrackedFiles,
+    lim,
+    onStatus,
   );
 
   log(
@@ -337,16 +344,10 @@ async function getFileDiff(
 }
 
 /** Get commit messages that touched a specific file (last 5). */
-async function getFileCommits(
-  pi: ExtensionAPI,
-  root: string,
-  file: string,
-): Promise<string> {
-  const result = await pi.exec(
-    "git",
-    ["-C", root, "log", "--oneline", "-5", "--", file],
-    { timeout: 5000 },
-  );
+async function getFileCommits(pi: ExtensionAPI, root: string, file: string): Promise<string> {
+  const result = await pi.exec("git", ["-C", root, "log", "--oneline", "-5", "--", file], {
+    timeout: 5000,
+  });
   return result.code === 0 ? result.stdout.trim() : "";
 }
 
@@ -466,9 +467,7 @@ export async function getContentFromLastCommit(
     const truncated = truncateDiff(diff, lim.maxDiffSize);
 
     // Build per-file sections with paths (reviewer reads files itself)
-    const fileSection = files
-      .map((f) => `### ${f}\n**Full path:** \`${f}\``)
-      .join("\n\n");
+    const fileSection = files.map((f) => `### ${f}\n**Full path:** \`${f}\``).join("\n\n");
 
     log("path3: last commit, files=", files);
     return {
@@ -489,9 +488,8 @@ export async function getContentFromToolCalls(
   agentToolCalls: TrackedToolCall[],
   changeSummary: string,
   onStatus?: (msg: string) => void,
-  limits?: ContentSizeLimits,
+  _limits?: ContentSizeLimits,
 ): Promise<ReviewContent | null> {
-  const lim = limits ?? LARGE_LIMITS;
   if (agentToolCalls.length === 0) return null;
 
   const candidatePaths = collectModifiedPaths(agentToolCalls);
@@ -513,9 +511,7 @@ export async function getContentFromToolCalls(
 
   if (reviewedFiles.length === 0 && !changeSummary.trim()) return null;
 
-  const fileSection = reviewedFiles
-    .map((f) => `### ${f}\n**Full path:** \`${f}\``)
-    .join("\n\n");
+  const fileSection = reviewedFiles.map((f) => `### ${f}\n**Full path:** \`${f}\``).join("\n\n");
 
   const content = [
     reviewedFiles.length > 0

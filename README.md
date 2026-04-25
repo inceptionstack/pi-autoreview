@@ -155,21 +155,22 @@ src/vendor/**
 ### Review progress widget
 
 During reviews, an animated widget appears below the editor showing:
+
 - ASCII art senior dev with reading glasses
 - File list with active file highlighted and per-file tool usage counts
 - Elapsed time, model name, loop count
 
 ### Commands
 
-| Command                       | Description                                                                     |
-| ----------------------------- | ------------------------------------------------------------------------------- |
-| `/review`                     | Toggle senior-review on/off                                                     |
-| `/review N`                   | Review the last N commits                                                       |
-| `/review-all`                 | Review all changes (pending diff → last commit → all files in cwd)              |
-| `/cancel-review`              | Cancel an in-progress review (works during roundup)                             |
-| `/scaffold-review-files`      | Create `.senior-review/` config templates in a git repo                         |
-| `/senior-edit-review-rules`   | Edit `.senior-review/review-rules.md` in pi's built-in editor                   |
-| `/add-review-rule <text>`     | Prepend a custom rule to `.senior-review/review-rules.md`                       |
+| Command                     | Description                                                        |
+| --------------------------- | ------------------------------------------------------------------ |
+| `/review`                   | Toggle senior-review on/off                                        |
+| `/review N`                 | Review the last N commits                                          |
+| `/review-all`               | Review all changes (pending diff → last commit → all files in cwd) |
+| `/cancel-review`            | Cancel an in-progress review (works during roundup)                |
+| `/scaffold-review-files`    | Create `.senior-review/` config templates in a git repo            |
+| `/senior-edit-review-rules` | Edit `.senior-review/review-rules.md` in pi's built-in editor      |
+| `/add-review-rule <text>`   | Prepend a custom rule to `.senior-review/review-rules.md`          |
 
 ### Keyboard shortcuts
 

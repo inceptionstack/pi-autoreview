@@ -233,7 +233,9 @@ export async function loadSettings(
   }
 
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    errors.push(`[senior-review] .senior-review/settings.json must be a JSON object. Using defaults.`);
+    errors.push(
+      `[senior-review] .senior-review/settings.json must be a JSON object. Using defaults.`,
+    );
     return { settings: { ...DEFAULT_SETTINGS }, errors };
   }
 

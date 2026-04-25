@@ -45,16 +45,22 @@ import {
   isFormattingOnlyTurn,
   isBinaryPath,
 } from "./changes";
-import { getBestReviewContent, FALLBACK_LIMITS, LARGE_LIMITS, buildPerFileContext } from "./context";
-import { loadIgnorePatterns, filterIgnored } from "./ignore";
 import {
-  loadArchitectRules,
-  runArchitectReview,
-  shouldRunArchitectReview,
-} from "./architect";
+  getBestReviewContent,
+  FALLBACK_LIMITS,
+  LARGE_LIMITS,
+  buildPerFileContext,
+} from "./context";
+import { loadIgnorePatterns, filterIgnored } from "./ignore";
+import { loadArchitectRules, runArchitectReview, shouldRunArchitectReview } from "./architect";
 import { findGitRoot, resolveAllGitRoots } from "./git-roots";
 import { log, logRotate } from "./logger";
-import { startReviewDisplay, inferArchModules, buildArchDiagram, type ReviewDisplayHandle } from "./review-display";
+import {
+  startReviewDisplay,
+  inferArchModules,
+  buildArchDiagram,
+  type ReviewDisplayHandle,
+} from "./review-display";
 import {
   SCAFFOLD_SETTINGS,
   SCAFFOLD_REVIEW_RULES,
@@ -133,7 +139,10 @@ export default function (pi: ExtensionAPI) {
   function startReviewWidget(
     ctx: { ui: any; hasUI?: boolean },
     files: string[],
-  ): { onActivity: (desc: string) => void; onToolCall: (toolName: string, targetPath: string | null) => void } {
+  ): {
+    onActivity: (desc: string) => void;
+    onToolCall: (toolName: string, targetPath: string | null) => void;
+  } {
     const noOp = () => {};
     if (!ctx.hasUI) return { onActivity: noOp, onToolCall: noOp };
 
@@ -191,7 +200,6 @@ export default function (pi: ExtensionAPI) {
     fileCapWarned = false;
     updateStatus(ctx);
   }
-
 
   /**
    * Clean up after a review completes (success, error, or cancel).
@@ -312,7 +320,7 @@ export default function (pi: ExtensionAPI) {
               const best = await getBestReviewContent(
                 pi,
                 agentToolCalls,
-                (msg) => updateStatus(ctx),
+                () => updateStatus(ctx),
                 ignorePatterns ?? undefined,
                 allRoots,
               );
@@ -331,7 +339,13 @@ export default function (pi: ExtensionAPI) {
                 log("prompt length:", prompt.length);
                 const result = await runReviewSession(
                   prompt,
-                  buildReviewOptions(reviewAbort.signal, ctx.cwd, best.files, onActivity, onToolCall),
+                  buildReviewOptions(
+                    reviewAbort.signal,
+                    ctx.cwd,
+                    best.files,
+                    onActivity,
+                    onToolCall,
+                  ),
                 );
                 log("result:", {
                   isLgtm: result.isLgtm,
@@ -550,8 +564,12 @@ export default function (pi: ExtensionAPI) {
         log("Context overflow, retrying with fallback limits");
         onActivity("retrying with smaller context…");
         const smallBest = await getBestReviewContent(
-          pi, agentToolCalls, undefined,
-          ignorePatterns ?? undefined, allRoots, FALLBACK_LIMITS,
+          pi,
+          agentToolCalls,
+          undefined,
+          ignorePatterns ?? undefined,
+          allRoots,
+          FALLBACK_LIMITS,
         );
         if (!smallBest || smallBest.content.trim().length < MIN_REVIEW_CONTENT_LENGTH) {
           log("Fallback content too small, skipping review");
@@ -581,7 +599,11 @@ export default function (pi: ExtensionAPI) {
         sendReviewResult(pi, result, "", { reviewedFiles: best.files });
 
         // Architect review: trigger when >1 file reviewed across the session from git repo(s)
-        if (settings.architectEnabled && !architectDone && shouldRunArchitectReview([...sessionChangedFiles], sessionHasGitContent)) {
+        if (
+          settings.architectEnabled &&
+          !architectDone &&
+          shouldRunArchitectReview([...sessionChangedFiles], sessionHasGitContent)
+        ) {
           architectDone = true;
           log(`architect: running — ${sessionChangedFiles.size} files reviewed across session`);
           updateStatus(ctx);
@@ -590,7 +612,10 @@ export default function (pi: ExtensionAPI) {
           if (reviewDisplay) {
             const allFiles = [...sessionChangedFiles];
             const modules = inferArchModules(allFiles);
-            const theme = { fg: ctx.ui.theme.fg as (c: string, t: string) => string, bold: ctx.ui.theme.bold };
+            const theme = {
+              fg: ctx.ui.theme.fg as (c: string, t: string) => string,
+              bold: ctx.ui.theme.bold,
+            };
             const archDiagram = buildArchDiagram(modules, null, theme);
             reviewDisplay.setArchitectMode(allFiles, archDiagram);
           }
@@ -901,10 +926,7 @@ export default function (pi: ExtensionAPI) {
       const ellipsis = lines.length > 10 ? "\n. . ." : "";
 
       if (ctx.hasUI) {
-        ctx.ui.notify(
-          `Rule added to ${filePath}\n\n${preview}${ellipsis}`,
-          "info",
-        );
+        ctx.ui.notify(`Rule added to ${filePath}\n\n${preview}${ellipsis}`, "info");
       }
     },
   });
@@ -1068,14 +1090,17 @@ export default function (pi: ExtensionAPI) {
           const hasPendingDiff = pendingDiff.code === 0 && pendingDiff.stdout.trim();
 
           // Get pending changed files
-          const pendingNames = await pi.exec("git", ["diff", "HEAD", "--name-only"], { timeout: 5000 });
-          let pendingFiles = pendingNames.code === 0
-            ? pendingNames.stdout.trim().split("\n").filter(Boolean)
-            : [];
+          const pendingNames = await pi.exec("git", ["diff", "HEAD", "--name-only"], {
+            timeout: 5000,
+          });
+          const pendingFiles =
+            pendingNames.code === 0 ? pendingNames.stdout.trim().split("\n").filter(Boolean) : [];
 
           // Include untracked files
           const untrackedResult = await pi.exec(
-            "git", ["ls-files", "--others", "--exclude-standard"], { timeout: 5000 },
+            "git",
+            ["ls-files", "--others", "--exclude-standard"],
+            { timeout: 5000 },
           );
           if (untrackedResult.code === 0 && untrackedResult.stdout.trim()) {
             const untracked = untrackedResult.stdout.trim().split("\n").filter(Boolean);
@@ -1098,15 +1123,23 @@ export default function (pi: ExtensionAPI) {
               return;
             }
 
-            const fileSectionsA = await buildPerFileContext(pi, gitRoot, reviewFiles, ["HEAD"], new Set(), LARGE_LIMITS);
+            const fileSectionsA = await buildPerFileContext(
+              pi,
+              gitRoot,
+              reviewFiles,
+              ["HEAD"],
+              new Set(),
+              LARGE_LIMITS,
+            );
 
             ctx.ui.notify(`Reviewing ${reviewFiles.length} pending file(s)…`, "info");
             prompt = `${buildReviewPrompt(autoReviewRules, customRules, lastUserMessage)}\n\n---\n\nReview all pending changes in the repo.\n\n## Files to review\n\nRead each file with read(path) to see its full contents.\n\n${fileSectionsA.join("\n\n---\n\n")}`;
-
           } else {
             // ── Path B: no pending changes — review last commit ──
             // Handle single-commit repos by diffing against the empty tree
-            const countResult = await pi.exec("git", ["rev-list", "--count", "HEAD"], { timeout: 5000 });
+            const countResult = await pi.exec("git", ["rev-list", "--count", "HEAD"], {
+              timeout: 5000,
+            });
             const totalCommits = parseInt(countResult.stdout.trim(), 10) || 0;
             if (totalCommits === 0) {
               ctx.ui.notify("No pending changes and no commits to review.", "info");
@@ -1123,12 +1156,11 @@ export default function (pi: ExtensionAPI) {
               diffArgs = ["HEAD~1", "HEAD"];
             }
 
-            const lastNames = await pi.exec(
-              "git", ["diff", ...diffArgs, "--name-only"], { timeout: 5000 },
-            );
-            reviewFiles = lastNames.code === 0
-              ? lastNames.stdout.trim().split("\n").filter(Boolean)
-              : [];
+            const lastNames = await pi.exec("git", ["diff", ...diffArgs, "--name-only"], {
+              timeout: 5000,
+            });
+            reviewFiles =
+              lastNames.code === 0 ? lastNames.stdout.trim().split("\n").filter(Boolean) : [];
 
             if (ignorePatterns && ignorePatterns.length > 0) {
               reviewFiles = filterIgnored(reviewFiles, ignorePatterns);
@@ -1143,22 +1175,43 @@ export default function (pi: ExtensionAPI) {
               await pi.exec("git", ["log", "--oneline", "-1"], { timeout: 5000 })
             ).stdout.trim();
 
-            const fileSectionsB = await buildPerFileContext(pi, gitRoot, reviewFiles, diffArgs, new Set(), LARGE_LIMITS);
+            const fileSectionsB = await buildPerFileContext(
+              pi,
+              gitRoot,
+              reviewFiles,
+              diffArgs,
+              new Set(),
+              LARGE_LIMITS,
+            );
 
             ctx.ui.notify(`Reviewing last commit (${commitLog})…`, "info");
             prompt = `${buildReviewPrompt(autoReviewRules, customRules, lastUserMessage)}\n\n---\n\nReview the last commit: ${commitLog}\n\n## Files to review\n\nRead each file with read(path) to see its full contents.\n\n${fileSectionsB.join("\n\n---\n\n")}`;
           }
-
         } else {
           // ── Path C: not a git repo — review all files in cwd ──
           const findResult = await pi.exec(
-            "find", [".",
-              "-maxdepth", "5", "-type", "f",
-              "-not", "-path", "*/node_modules/*",
-              "-not", "-path", "*/.git/*",
-              "-not", "-path", "*/dist/*",
-              "-not", "-path", "*/build/*",
-              "-not", "-name", "*.min.*",
+            "find",
+            [
+              ".",
+              "-maxdepth",
+              "5",
+              "-type",
+              "f",
+              "-not",
+              "-path",
+              "*/node_modules/*",
+              "-not",
+              "-path",
+              "*/.git/*",
+              "-not",
+              "-path",
+              "*/dist/*",
+              "-not",
+              "-path",
+              "*/build/*",
+              "-not",
+              "-name",
+              "*.min.*",
             ],
             { timeout: 10000 },
           );
@@ -1167,7 +1220,9 @@ export default function (pi: ExtensionAPI) {
             return;
           }
 
-          reviewFiles = findResult.stdout.trim().split("\n")
+          reviewFiles = findResult.stdout
+            .trim()
+            .split("\n")
             .filter(Boolean)
             .filter((f) => !isBinaryPath(f));
 
