@@ -438,10 +438,14 @@ export function startReviewDisplay(
     lastToolDesc: new Map(initialState.lastToolDesc),
   };
 
-  // Per-instance animation state
-  let animFrame = 0;
+  // Per-instance animation state.
+  // animFrame starts at 1 (the furrowed/inquisitive frame) so the robot looks
+  // actively thinking from the first render — even in single-file reviews where
+  // there's never a file-switch event. Timer only ticks the spinner; animFrame
+  // advances when the active file changes (see recordToolCall).
+  const artFrameCount = (initialState.isArchitect ? ARCHITECT_FRAMES : SENIOR_FRAMES).length;
+  let animFrame = Math.min(1, artFrameCount - 1);
   let spinnerFrame = 0;
-  let tickCount = 0;
   let timer: ReturnType<typeof setInterval> | undefined;
 
   function redraw() {
@@ -457,14 +461,11 @@ export function startReviewDisplay(
     }
   }
 
-  // Animate: tick every 150ms for spinner, toggle senior art every ~600ms
+  // Animate: spinner ticks every 150ms so the "working" indicator feels live.
+  // The eyebrow frame is driven by activity (file switches), not by wall clock,
+  // so the robot's expression reflects what it's actually doing.
   timer = setInterval(() => {
     spinnerFrame = (spinnerFrame + 1) % SPINNER_FRAMES.length;
-    tickCount++;
-    if (tickCount % 4 === 0) {
-      animFrame =
-        (animFrame + 1) % (state.isArchitect ? ARCHITECT_FRAMES.length : SENIOR_FRAMES.length);
-    }
     redraw();
   }, 150);
 
@@ -497,6 +498,13 @@ export function startReviewDisplay(
       if (match) {
         state.toolCounts.set(match, (state.toolCounts.get(match) ?? 0) + 1);
         state.lastToolDesc.set(match, desc);
+        // Advance the eyebrow frame when the reviewer moves to a different file.
+        // Staying on the same file doesn't toggle — matches the user intent of
+        // "eyebrow changes only when switching between files".
+        if (state.activeFile !== match) {
+          const frames = state.isArchitect ? ARCHITECT_FRAMES : SENIOR_FRAMES;
+          animFrame = (animFrame + 1) % frames.length;
+        }
         state.activeFile = match;
       }
 
@@ -542,6 +550,10 @@ export function startReviewDisplay(
       // senior timeout into the architect display.
       state.timeoutMs = typeof timeoutMs === "number" && timeoutMs > 0 ? timeoutMs : 0;
       state.activity = "architecture review…";
+      // Reset the eyebrow to the furrowed/inquisitive frame so the architect
+      // starts "looking curious" from the first render, matching the senior
+      // review's initial expression.
+      animFrame = Math.min(1, ARCHITECT_FRAMES.length - 1);
       redraw();
     },
     stop() {

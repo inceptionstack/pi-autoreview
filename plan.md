@@ -38,7 +38,7 @@ New design topics captured during a working session; **none implemented yet**, a
 5. **Collapse finished files** — once a file's tool-call count exceeds a threshold (say, 3 reads), collapse it to a single line `• N files read (click to expand)`. Not really interactive in a TUI widget though.
 6. **Scroll indicator** — just show the first 5 and print `↓ 5 more below` at the bottom. Simplest scroll UI, no actual scroll needed since the widget redraws each tick.
 
-**Tension:** we want at-a-glance visibility of *which file is active* and *overall progress*. Option 2 (scrolling window) preserves both; option 4 (compact line) is the most disciplined if we trust the active-file indicator.
+**Tension:** we want at-a-glance visibility of _which file is active_ and _overall progress_. Option 2 (scrolling window) preserves both; option 4 (compact line) is the most disciplined if we trust the active-file indicator.
 
 **Tests:** property-style fixture test in `test/review-display.test.ts` — for file counts from 0 to 30, assert widget height ≤ some budget (e.g. 12 lines).
 
@@ -65,7 +65,7 @@ New design topics captured during a working session; **none implemented yet**, a
 
 ## D4. Refactor: reviewers as pluggable "agent personalities" in a pipeline
 
-**Vision:** Today's hard-coded pair (senior review then optional architect review) should become a generic review *pipeline* where each step is an "agent personality" with its own:
+**Vision:** Today's hard-coded pair (senior review then optional architect review) should become a generic review _pipeline_ where each step is an "agent personality" with its own:
 
 - **System prompt** (the role / charter)
 - **Review rules** (appended to prompt; e.g. `review-rules.md`, `architect.md`, `security.md`, ...)
@@ -81,20 +81,20 @@ New design topics captured during a working session; **none implemented yet**, a
 ```ts
 // One personality = one reviewer role
 export interface ReviewPersonality {
-  id: string;                             // "senior" | "architect" | "security" | ...
-  displayName: string;                    // "Senior Review" (shown to user)
-  systemPrompt: string;                   // the role/charter
-  customRulesFile?: string;               // .lgtm/<id>.md (optional)
-  contextStrategy: ContextStrategy;       // per-file diff | full repo | last commit | ...
+  id: string; // "senior" | "architect" | "security" | ...
+  displayName: string; // "Senior Review" (shown to user)
+  systemPrompt: string; // the role/charter
+  customRulesFile?: string; // .lgtm/<id>.md (optional)
+  contextStrategy: ContextStrategy; // per-file diff | full repo | last commit | ...
   verdictParser: (raw: string) => Verdict;
-  outputHandler: (result, api) => void;   // how to deliver to user/agent
+  outputHandler: (result, api) => void; // how to deliver to user/agent
 }
 
 // One pipeline step = one personality invocation, with DAG metadata
 export interface PipelineStep {
   personality: ReviewPersonality;
-  trigger: TriggerCondition;              // e.g. always | multi-file | on-commit
-  dependsOn: string[];                    // ids of steps that must pass before this runs
+  trigger: TriggerCondition; // e.g. always | multi-file | on-commit
+  dependsOn: string[]; // ids of steps that must pass before this runs
   runMode: "serial" | "parallel";
 }
 
@@ -130,7 +130,7 @@ export interface ReviewPipeline {
 
 ```ts
 export interface ReviewBackend {
-  id: string;                            // "pi-sdk" | "codex-cli" | "claude-cli" | "shell"
+  id: string; // "pi-sdk" | "codex-cli" | "claude-cli" | "shell"
   invoke(prompt: string, opts: InvokeOpts): Promise<BackendResult>;
   capabilities: {
     hasReadTool: boolean;
@@ -162,20 +162,20 @@ export interface InvokeOpts {
 - **Activity streaming**: pi SDK emits structured tool-call events so the widget can update in real-time. External CLIs emit free-form stdout. We'd need heuristics (grep for `read <path>`) or settle for a simpler widget when backends don't support structured events.
 - **Tool capabilities vary**: codex has its own read-only sandbox; claude-cli via MCP has different tool shape; a shell backend has none. Personalities should declare what capabilities they need, and backends should be rejected if missing (e.g. security-review needs bash + read, so can't pair with a shell backend that only has text-in/text-out).
 - **Auth**: each external backend has its own auth (codex uses OpenAI, claude-cli uses Anthropic, etc.). We don't manage it; we just invoke the binary and trust it's set up. Add a health-check on extension init: `which codex` etc.
-- **Error surfaces**: external CLIs can fail in more ways (binary missing, auth broken, sandbox rejected, etc.). Fail-open logic stays the same but the error messages need to be clear about *which backend* failed.
+- **Error surfaces**: external CLIs can fail in more ways (binary missing, auth broken, sandbox rejected, etc.). Fail-open logic stays the same but the error messages need to be clear about _which backend_ failed.
 - **Security**: invoking an external CLI with a large prompt that contains user code — make sure we don't accidentally exfil. Should be fine since the user opted in, but worth a paragraph in README.
 
 **Integration with D4:**
 
 D4's `ReviewPersonality` gets a new field:
+
 ```ts
-backend: string;   // "pi-sdk" | "codex-cli" | "claude-cli" | "shell:my-custom"
+backend: string; // "pi-sdk" | "codex-cli" | "claude-cli" | "shell:my-custom"
 ```
 
 Default to pi-sdk for all existing personalities; users override per step in their settings.
 
 **Status:** [ ] design only. Needs backend contract RFC first, then pilot with codex-cli as the second backend (since we already use it in the dev loop — fastest path to validate the abstraction).
-
 
 ## Open Issues
 
