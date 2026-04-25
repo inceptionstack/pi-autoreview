@@ -351,7 +351,7 @@ export function registerReviewCommands(opts: RegisterCommandsOptions): ManualRev
           const findResult = await opts.pi.exec(
             "find",
             [
-              ".",
+              ctx.cwd,
               "-maxdepth",
               "5",
               "-type",
