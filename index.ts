@@ -21,8 +21,6 @@
  *   or: cp index.ts ~/.pi/agent/extensions/pi-senior-review.ts
  */
 
-import { createHash } from "node:crypto";
-
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
 import {
@@ -40,22 +38,16 @@ import { runReviewSession } from "./reviewer";
 import { sendReviewResult } from "./message-sender";
 import {
   type TrackedToolCall,
-  hasFileChanges,
   isFileModifyingTool,
   collectModifiedPaths,
-  isFormattingOnlyTurn,
   isBinaryPath,
 } from "./changes";
-import {
-  getBestReviewContent,
-  FALLBACK_LIMITS,
-  LARGE_LIMITS,
-  buildPerFileContext,
-} from "./context";
+import { getBestReviewContent, LARGE_LIMITS, buildPerFileContext } from "./context";
 import { loadIgnorePatterns, filterIgnored } from "./ignore";
-import { loadArchitectRules, runArchitectReview, shouldRunArchitectReview } from "./architect";
+import { loadArchitectRules } from "./architect";
 import { findGitRoot, resolveAllGitRoots } from "./git-roots";
 import { log, logRotate } from "./logger";
+import { ReviewOrchestrator, type ReviewOutcome } from "./orchestrator";
 import {
   startReviewDisplay,
   inferArchModules,
@@ -72,24 +64,12 @@ import {
 
 const MAX_TRACKED_FILES = 1000;
 
-/** Minimum content length to trigger a review (avoids reviewing trivial/empty diffs) */
-const MIN_REVIEW_CONTENT_LENGTH = 50;
-
 // ── Extension ────────────────────────────────────────
 
 export default function (pi: ExtensionAPI) {
-  let reviewEnabled = true;
   let reviewAbort: AbortController | null = null;
   let isReviewing = false;
-  let lastReviewHadIssues = false;
-  let lastReviewedContentHash = "";
-  let reviewLoopCount = 0;
-  let peakReviewLoopCount = 0; // highest loop count before LGTM (tracks if fixes happened)
-  let architectDone = false;
   let architectRules: string | null = null;
-  let sessionChangeSummaries: string[] = []; // accumulates change summaries across loops
-  let sessionChangedFiles = new Set<string>(); // accumulates files across review loops for architect review
-  let sessionHasGitContent = false; // true once any review loop used git-based content
 
   let settings: AutoReviewSettings = { ...DEFAULT_SETTINGS };
   let customRules: string | null = null;
@@ -107,6 +87,19 @@ export default function (pi: ExtensionAPI) {
   // Load shortcut config synchronously at init (before session_start)
   // so registerShortcut() uses the configured keys.
   const shortcutConfig = loadShortcutSettingsSync(process.cwd());
+
+  const orchestrator = new ReviewOrchestrator({
+    runner: runReviewSession,
+    contentBuilder: (input) =>
+      getBestReviewContent(
+        pi,
+        input.agentToolCalls,
+        input.onStatus,
+        input.ignorePatterns,
+        input.gitRoots,
+        input.limits,
+      ),
+  });
 
   // ── Helpers ──────────────────────────────────────
 
@@ -151,7 +144,7 @@ export default function (pi: ExtensionAPI) {
       files,
       activeFile: null,
       activity: "starting…",
-      loopCount: reviewLoopCount,
+      loopCount: orchestrator.currentLoopCount,
       maxLoops: settings.maxReviewLoops,
       model: settings.model,
       startTime: Date.now(),
@@ -171,26 +164,6 @@ export default function (pi: ExtensionAPI) {
         if (reviewDisplay) reviewDisplay.recordToolCall(toolName, targetPath);
       },
     };
-  }
-
-  /**
-   * Check if an error indicates the model's context window was exceeded.
-   */
-  function isContextOverflowError(err: any): boolean {
-    const msg = (err?.message ?? String(err)).toLowerCase();
-    return (
-      msg.includes("too many tokens") ||
-      (msg.includes("context") && msg.includes("length")) ||
-      (msg.includes("context") && msg.includes("window")) ||
-      (msg.includes("context") && msg.includes("too long")) ||
-      (msg.includes("maximum") && msg.includes("token")) ||
-      (msg.includes("input") && msg.includes("too large")) ||
-      (msg.includes("prompt") && msg.includes("too long")) ||
-      (msg.includes("exceeds") && msg.includes("context")) ||
-      (msg.includes("exceeds") && msg.includes("token")) ||
-      msg.includes("payload too large") ||
-      msg.includes("request too large")
-    );
   }
 
   function resetTrackingState(ctx: { ui: any; hasUI?: boolean }) {
@@ -224,9 +197,9 @@ export default function (pi: ExtensionAPI) {
     if (!ctx.hasUI || !ctx.ui) return;
     const theme = ctx.ui.theme;
     const label = theme.fg("accent", "senior-review");
-    const state = reviewEnabled ? theme.fg("success", "on") : theme.fg("dim", "off");
+    const state = orchestrator.isEnabled ? theme.fg("success", "on") : theme.fg("dim", "off");
 
-    if (isReviewing) {
+    if (isReviewing || orchestrator.isReviewing) {
       const cancelHint = shortcutConfig.cancelShortcut
         ? `${shortcutConfig.cancelShortcut} or /cancel-review`
         : "/cancel-review";
@@ -244,10 +217,12 @@ export default function (pi: ExtensionAPI) {
       allPaths.delete("(bash file op)");
       const count = allPaths.size;
       if (count > 0) {
-        const verb = reviewEnabled
+        const verb = orchestrator.isEnabled
           ? theme.fg("muted", "will review")
           : theme.fg("muted", "pending");
-        const issueIndicator = lastReviewHadIssues ? ` ${theme.fg("error", "issues found")}` : "";
+        const issueIndicator = orchestrator.lastHadIssues
+          ? ` ${theme.fg("error", "issues found")}`
+          : "";
         ctx.ui.setStatus(
           "code-review",
           `${label} ${state}${issueIndicator} · ${verb} ${theme.fg("accent", String(count))} ${theme.fg("muted", count === 1 ? "file" : "files")} ${theme.fg("dim", "(Alt+R toggle)")}`,
@@ -256,7 +231,9 @@ export default function (pi: ExtensionAPI) {
       }
     }
 
-    const issueIndicator = lastReviewHadIssues ? ` ${theme.fg("error", "issues found")}` : "";
+    const issueIndicator = orchestrator.lastHadIssues
+      ? ` ${theme.fg("error", "issues found")}`
+      : "";
     ctx.ui.setStatus(
       "code-review",
       `${label} ${state}${issueIndicator} ${theme.fg("dim", "(Alt+R toggle)")}`,
@@ -276,15 +253,8 @@ export default function (pi: ExtensionAPI) {
     isToggling = true;
 
     try {
-      reviewEnabled = !reviewEnabled;
-      if (reviewEnabled) {
-        reviewLoopCount = 0;
-        peakReviewLoopCount = 0;
-        lastReviewedContentHash = "";
-        architectDone = false;
-        sessionChangeSummaries = [];
-        sessionChangedFiles = new Set();
-        sessionHasGitContent = false;
+      orchestrator.setEnabled(!orchestrator.isEnabled);
+      if (orchestrator.isEnabled) {
         if (ctx.hasUI) ctx.ui.notify(`Senior review: on`, "info");
         // Only prompt to review if agent is idle and there are pending files.
         // If agent is mid-turn, silently enable — review triggers at next agent_end.
@@ -297,7 +267,6 @@ export default function (pi: ExtensionAPI) {
             { timeout: 30000 },
           );
           if (ok) {
-            reviewLoopCount++;
             isReviewing = true;
             reviewAbort = new AbortController();
             updateStatus(ctx);
@@ -353,7 +322,6 @@ export default function (pi: ExtensionAPI) {
                   durationMs: result.durationMs,
                   textLen: result.text.length,
                 });
-                if (result.isLgtm) reviewLoopCount = 0;
                 sendReviewResult(pi, result, best.label, { reviewedFiles: best.files });
               } else {
                 log("no changes found");
@@ -448,6 +416,60 @@ export default function (pi: ExtensionAPI) {
 
   // ── Auto-review on agent_end ───────────────────────
 
+  function renderOutcome(outcome: ReviewOutcome) {
+    switch (outcome.type) {
+      case "skipped":
+        return;
+      case "cancelled":
+        return;
+      case "max_loops":
+        return;
+      case "error": {
+        const errMsg = outcome.error.message;
+        pi.sendMessage(
+          {
+            customType: "code-review",
+            content: `⚠️ **Senior review failed**\n\n${errMsg}\n\nThe review could not complete. Check the model configuration in .senior-review/settings.json.`,
+            display: true,
+          },
+          { triggerTurn: false, deliverAs: "followUp" },
+        );
+        return;
+      }
+      case "completed": {
+        const hasArchitect = Boolean(outcome.architect);
+        sendReviewResult(pi, outcome.senior.result, outcome.senior.label ?? "", {
+          showLoopCount: outcome.senior.loopInfo,
+          reviewedFiles: outcome.files,
+          triggerTurn: !hasArchitect,
+        });
+
+        if (!outcome.architect) return;
+
+        const architectResult = outcome.architect.result;
+        if (architectResult.isLgtm) {
+          pi.sendMessage(
+            {
+              customType: "code-review",
+              content: `🏗️ **Architect Review**\n\nFinal architecture review found no issues. Everything fits together.\n\nIf you were waiting to push until after reviews were done — all reviews are done, no issues found. Safe to push.`,
+              display: true,
+            },
+            { triggerTurn: true, deliverAs: "followUp" },
+          );
+        } else {
+          pi.sendMessage(
+            {
+              customType: "code-review",
+              content: `🏗️ **Architect Review**\n\nFinal architecture review found potential issues:\n\n${architectResult.text}\n\nPlease review these findings. These are big-picture concerns that individual reviews may have missed.\n\n⚠️ **Do NOT push to remote yet.** Fix any issues first.`,
+              display: true,
+            },
+            { triggerTurn: true, deliverAs: "followUp" },
+          );
+        }
+      }
+    }
+  }
+
   pi.on("agent_end", async (event, ctx) => {
     // Don't interfere if a toggle-review is in progress (confirm dialog open)
     if (isToggling) return;
@@ -460,53 +482,13 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
-    if (!reviewEnabled) {
+    if (!orchestrator.isEnabled) {
       // Keep tracking state (modifiedFiles, agentToolCalls) so we can
       // offer to review when the user toggles review back on.
       // Just update the status bar to show pending file count.
       updateStatus(ctx);
       return;
     }
-
-    if (reviewLoopCount >= settings.maxReviewLoops) {
-      if (ctx.hasUI)
-        ctx.ui.notify(
-          `Senior review: max loops reached (${settings.maxReviewLoops}). Toggle /review to reset.`,
-          "warning",
-        );
-      resetTrackingState(ctx);
-      return;
-    }
-
-    if (!hasFileChanges(agentToolCalls)) {
-      resetTrackingState(ctx);
-      return;
-    }
-
-    // Skip review if the turn only ran formatters/linters
-    // (prettier, eslint --fix, black, gofmt, etc. — cosmetic changes only)
-    if (isFormattingOnlyTurn(agentToolCalls)) {
-      log("skipping review: formatting/linting only");
-      resetTrackingState(ctx);
-      return;
-    }
-
-    // Skip review if no real file paths were modified
-    // (bash-only turns like cat/tail/ls shouldn't trigger review)
-    const realFiles = new Set([
-      ...[...modifiedFiles].filter((f) => f !== "(bash file op)"),
-      ...collectModifiedPaths(agentToolCalls),
-    ]);
-    if (realFiles.size === 0) {
-      log("skipping review: no real file paths found");
-      resetTrackingState(ctx);
-      return;
-    }
-
-    reviewLoopCount++;
-    isReviewing = true;
-    reviewAbort = new AbortController();
-    updateStatus(ctx);
 
     try {
       // Resolve git roots from tracked files, tool call paths, and detected bash git commands
@@ -524,166 +506,58 @@ export default function (pi: ExtensionAPI) {
       log("modifiedFiles:", [...modifiedFiles]);
       log("agentToolCalls:", agentToolCalls.length);
 
-      let best = await getBestReviewContent(
-        pi,
+      let reviewCallbacks: ReturnType<typeof startReviewWidget> | null = null;
+      const outcome = await orchestrator.handleAgentEnd({
         agentToolCalls,
-        undefined,
-        ignorePatterns ?? undefined,
-        allRoots,
-      );
-
-      if (!best || best.content.trim().length < MIN_REVIEW_CONTENT_LENGTH) {
-        log("no meaningful changes, skipping");
-        resetTrackingState(ctx);
-        return;
-      }
-
-      log("best:", { label: best.label, files: best.files, contentLen: best.content.length });
-
-      // Skip if we've already reviewed this exact content
-      const contentHash = createHash("sha256").update(best.content).digest("hex");
-      if (contentHash === lastReviewedContentHash) {
-        log("Skipping — same content as last review");
-        resetTrackingState(ctx);
-        return;
-      }
-
-      updateStatus(ctx);
-      const { onActivity, onToolCall } = startReviewWidget(ctx, best.files);
-      log(
-        `Reviewing ${best.files.length} files via ${best.label || "git diff"}: ${best.files.join(", ")}`,
-      );
-      let prompt = `${buildReviewPrompt(autoReviewRules, customRules, lastUserMessage)}\n\n---\n\n${best.content}`;
-      let result;
-      try {
-        result = await runReviewSession(
-          prompt,
-          buildReviewOptions(reviewAbort.signal, ctx.cwd, best.files, onActivity, onToolCall),
-        );
-      } catch (retryErr: any) {
-        if (!isContextOverflowError(retryErr)) throw retryErr;
-        log("Context overflow, retrying with fallback limits");
-        onActivity("retrying with smaller context…");
-        const smallBest = await getBestReviewContent(
-          pi,
-          agentToolCalls,
-          undefined,
-          ignorePatterns ?? undefined,
-          allRoots,
-          FALLBACK_LIMITS,
-        );
-        if (!smallBest || smallBest.content.trim().length < MIN_REVIEW_CONTENT_LENGTH) {
-          log("Fallback content too small, skipping review");
-          resetTrackingState(ctx);
-          return;
-        }
-        best = smallBest;
-        prompt = `${buildReviewPrompt(autoReviewRules, customRules, lastUserMessage)}\n\n---\n\n${best.content}`;
-        result = await runReviewSession(
-          prompt,
-          buildReviewOptions(reviewAbort.signal, ctx.cwd, best.files, onActivity, onToolCall),
-        );
-      }
-
-      // Track change summary and files for architect review
-      sessionChangeSummaries.push(best.content.slice(0, 5000));
-      for (const f of best.files) sessionChangedFiles.add(f);
-      if (best.isGitBased) sessionHasGitContent = true;
-
-      // Mark content as reviewed (only after successful completion)
-      // Recompute hash since fallback retry may have replaced best
-      lastReviewedContentHash = createHash("sha256").update(best.content).digest("hex");
-
-      if (result.isLgtm) {
-        lastReviewHadIssues = false;
-        reviewLoopCount = 0;
-
-        // Check if architect review will follow BEFORE sending the LGTM.
-        // If yes, send LGTM with triggerTurn: false to avoid invalidating ctx
-        // (sendMessage with triggerTurn: true starts a new agent turn which
-        // replaces the session and makes the current ctx stale).
-        const willRunArchitect =
-          settings.architectEnabled &&
-          !architectDone &&
-          shouldRunArchitectReview([...sessionChangedFiles], sessionHasGitContent);
-
-        sendReviewResult(pi, result, "", {
-          reviewedFiles: best.files,
-          triggerTurn: !willRunArchitect,
-        });
-
-        if (willRunArchitect) {
-          architectDone = true;
-          log(`architect: running — ${sessionChangedFiles.size} files reviewed across session`);
+        modifiedFiles,
+        gitRoots: allRoots,
+        cwd: ctx.cwd,
+        settings,
+        customRules,
+        autoReviewRules,
+        ignorePatterns,
+        architectRules,
+        lastUserMessage,
+        onActivity: (desc) => reviewCallbacks?.onActivity(desc),
+        onToolCall: (toolName, targetPath) => reviewCallbacks?.onToolCall(toolName, targetPath),
+        onArchitectActivity: (desc) => {
+          if (reviewDisplay) reviewDisplay.update({ activity: `architect: ${desc}` });
+        },
+        onArchitectToolCall: (toolName, targetPath) => {
+          if (reviewDisplay) reviewDisplay.recordToolCall(toolName, targetPath);
+        },
+        onContentReady: (files) => {
           updateStatus(ctx);
+          reviewCallbacks = startReviewWidget(ctx, files);
+        },
+        onArchitectStart: (files) => {
+          updateStatus(ctx);
+          if (!reviewDisplay) return;
+          const modules = inferArchModules(files);
+          const theme = {
+            fg: ctx.ui.theme.fg as (c: string, t: string) => string,
+            bold: ctx.ui.theme.bold,
+          };
+          const archDiagram = buildArchDiagram(modules, null, theme);
+          reviewDisplay.setArchitectMode(files, archDiagram);
+        },
+      });
 
-          // Switch widget to architect mode with inferred architecture diagram
-          if (reviewDisplay) {
-            const allFiles = [...sessionChangedFiles];
-            const modules = inferArchModules(allFiles);
-            const theme = {
-              fg: ctx.ui.theme.fg as (c: string, t: string) => string,
-              bold: ctx.ui.theme.bold,
-            };
-            const archDiagram = buildArchDiagram(modules, null, theme);
-            reviewDisplay.setArchitectMode(allFiles, archDiagram);
-          }
-
-          try {
-            const summaryText = sessionChangeSummaries.join("\n\n---\n\n");
-            const architectResult = await runArchitectReview(runReviewSession, {
-              signal: reviewAbort!.signal,
-              cwd: ctx.cwd,
-              model: settings.model,
-              customRules: architectRules,
-              sessionChangeSummary: summaryText,
-              onActivity: (desc) => {
-                if (reviewDisplay) reviewDisplay.update({ activity: `architect: ${desc}` });
-              },
-              onToolCall: (toolName, targetPath) => {
-                if (reviewDisplay) reviewDisplay.recordToolCall(toolName, targetPath);
-              },
-            });
-
-            if (architectResult.isLgtm) {
-              pi.sendMessage(
-                {
-                  customType: "code-review",
-                  content: `🏗️ **Architect Review**\n\nFinal architecture review found no issues. Everything fits together.\n\nIf you were waiting to push until after reviews were done — all reviews are done, no issues found. Safe to push.`,
-                  display: true,
-                },
-                { triggerTurn: true, deliverAs: "followUp" },
-              );
-            } else {
-              pi.sendMessage(
-                {
-                  customType: "code-review",
-                  content: `🏗️ **Architect Review**\n\nFinal architecture review found potential issues:\n\n${architectResult.text}\n\nPlease review these findings. These are big-picture concerns that individual reviews may have missed.\n\n⚠️ **Do NOT push to remote yet.** Fix any issues first.`,
-                  display: true,
-                },
-                { triggerTurn: true, deliverAs: "followUp" },
-              );
-            }
-          } catch (err: any) {
-            if (err?.message === "Review cancelled") throw err;
-            log(`ERROR: Architect review failed: ${err?.message ?? err}`);
-          } finally {
-            // Reset accumulated state so next architect cycle starts fresh
-            sessionChangeSummaries = [];
-            sessionChangedFiles = new Set();
-            peakReviewLoopCount = 0;
-            architectDone = false;
-            sessionHasGitContent = false;
-          }
-        }
-      } else {
-        peakReviewLoopCount = Math.max(peakReviewLoopCount, reviewLoopCount);
-        lastReviewHadIssues = true;
-        sendReviewResult(pi, result, "", {
-          showLoopCount: `loop ${reviewLoopCount}/${settings.maxReviewLoops}`,
-          reviewedFiles: best.files,
-        });
+      if (outcome.type === "max_loops" && ctx.hasUI) {
+        ctx.ui.notify(
+          `Senior review: max loops reached (${settings.maxReviewLoops}). Toggle /review to reset.`,
+          "warning",
+        );
       }
+      if (outcome.type === "cancelled" && ctx.hasUI)
+        ctx.ui.notify("Senior review cancelled", "info");
+      if (outcome.type === "error") {
+        const errMsg = outcome.error.message;
+        log(`ERROR: Review failed: ${errMsg}`);
+        if (ctx.hasUI) ctx.ui.notify(`Senior review error: ${errMsg.slice(0, 200)}`, "error");
+      }
+
+      renderOutcome(outcome);
     } catch (err: any) {
       if (err?.message === "Review cancelled") {
         if (ctx.hasUI) ctx.ui.notify("Senior review cancelled", "info");
@@ -709,9 +583,10 @@ export default function (pi: ExtensionAPI) {
 
   // Cancel handler — shared by shortcut + command
   function cancelReview(ctx: { ui: any; hasUI?: boolean }, source: string) {
-    if (isReviewing && reviewAbort) {
+    if ((isReviewing && reviewAbort) || orchestrator.isReviewing) {
       log(`Cancel requested via ${source}`);
-      reviewAbort.abort();
+      reviewAbort?.abort();
+      orchestrator.cancel();
       if (ctx.hasUI) ctx.ui.notify("Senior review cancelled", "info");
     }
   }
@@ -740,16 +615,9 @@ export default function (pi: ExtensionAPI) {
       if (isReviewing && reviewAbort) {
         reviewAbort.abort();
       }
+      orchestrator.reset();
       isReviewing = false;
       reviewAbort = null;
-      reviewLoopCount = 0;
-      peakReviewLoopCount = 0;
-      lastReviewedContentHash = "";
-      architectDone = false;
-      lastReviewHadIssues = false;
-      sessionChangeSummaries = [];
-      sessionChangedFiles = new Set();
-      sessionHasGitContent = false;
       if (reviewDisplay) {
         reviewDisplay.stop();
         reviewDisplay = null;
@@ -770,7 +638,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("cancel-review", {
     description: "Cancel an in-progress code review",
     handler: async (_args, ctx) => {
-      if (isReviewing && reviewAbort) {
+      if ((isReviewing && reviewAbort) || orchestrator.isReviewing) {
         cancelReview(ctx, "/cancel-review");
       } else {
         if (ctx.hasUI) ctx.ui.notify("No review in progress", "info");
@@ -1301,13 +1169,7 @@ export default function (pi: ExtensionAPI) {
   // ── Session lifecycle ──────────────────────────────
 
   pi.on("session_start", async (_event, ctx) => {
-    reviewLoopCount = 0;
-    peakReviewLoopCount = 0;
-    lastReviewedContentHash = "";
-    architectDone = false;
-    sessionChangeSummaries = [];
-    sessionChangedFiles = new Set();
-    sessionHasGitContent = false;
+    orchestrator.reset();
 
     const [rules, autoRules, settingsResult, patterns, rRules] = await Promise.all([
       loadReviewRules(ctx.cwd),
@@ -1344,6 +1206,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_shutdown", async () => {
     if (reviewAbort) reviewAbort.abort();
+    orchestrator.cancel();
     if (reviewDisplay) {
       reviewDisplay.stop();
       reviewDisplay = null;
