@@ -99,6 +99,8 @@ export interface ArchitectReviewOptions {
   model?: string;
   customRules: string | null;
   sessionChangeSummary: string;
+  /** Unique id for the architect review cycle. Separate from the senior review id. */
+  reviewId?: string;
   onActivity?: (description: string) => void;
   onToolCall?: (toolName: string, targetPath: string | null) => void;
 }
@@ -116,6 +118,7 @@ export async function runArchitectReview(
     signal: opts.signal,
     cwd: opts.cwd,
     model: opts.model,
+    reviewId: opts.reviewId,
     onActivity: opts.onActivity,
     onToolCall: opts.onToolCall,
   });

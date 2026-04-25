@@ -47,6 +47,8 @@ export interface ReviewOptions {
   timeoutMs?: number;
   /** Files being reviewed (used in the structured log record). */
   filesReviewed?: string[];
+  /** Unique id for this review cycle — used as a log prefix and embedded in the structured record. */
+  reviewId?: string;
   /** Called when the reviewer uses tools — for status bar updates */
   onActivity?: (description: string) => void;
   /** Called with structured tool call info — for display widget */
@@ -162,7 +164,10 @@ function formatActivity(name: string, args: any): string {
 export async function runReviewSession(prompt: string, opts: ReviewOptions): Promise<ReviewResult> {
   const startTime = Date.now();
   const startedAt = new Date().toISOString();
-  log(`reviewer: starting (prompt=${(prompt.length / 1000).toFixed(1)}k chars, cwd=${opts.cwd})`);
+  const idPrefix = opts.reviewId ? `[${opts.reviewId}] ` : "";
+  const rlog = (...args: any[]) =>
+    log(idPrefix + args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" "));
+  rlog(`reviewer: starting (prompt=${(prompt.length / 1000).toFixed(1)}k chars, cwd=${opts.cwd})`);
 
   let authStorage: ReturnType<typeof AuthStorage.create>;
   let modelRegistry: ReturnType<typeof ModelRegistry.create>;
@@ -170,8 +175,8 @@ export async function runReviewSession(prompt: string, opts: ReviewOptions): Pro
     authStorage = AuthStorage.create();
     modelRegistry = ModelRegistry.create(authStorage);
   } catch (err: any) {
-    log(`reviewer: failed to create auth/model registry: ${err?.message ?? err}`);
-    log(`reviewer: stack: ${err?.stack ?? "(no stack)"}`);
+    rlog(`reviewer: failed to create auth/model registry: ${err?.message ?? err}`);
+    rlog(`reviewer: stack: ${err?.stack ?? "(no stack)"}`);
     throw err;
   }
 
@@ -187,11 +192,11 @@ export async function runReviewSession(prompt: string, opts: ReviewOptions): Pro
     });
     session = result.session;
   } catch (err: any) {
-    log(`reviewer: createAgentSession failed: ${err?.message ?? err}`);
-    log(`reviewer: stack: ${err?.stack ?? "(no stack)"}`);
+    rlog(`reviewer: createAgentSession failed: ${err?.message ?? err}`);
+    rlog(`reviewer: stack: ${err?.stack ?? "(no stack)"}`);
     throw err;
   }
-  log(`reviewer: session created, initial model=${session.model?.provider}/${session.model?.id}`);
+  rlog(`reviewer: session created, initial model=${session.model?.provider}/${session.model?.id}`);
 
   // Set the reviewer model if specified
   const sessionModelName = session.model
@@ -205,12 +210,12 @@ export async function runReviewSession(prompt: string, opts: ReviewOptions): Pro
       if (model) {
         try {
           await session.setModel(model);
-          log(`reviewer: using model ${opts.model}`);
+          rlog(`reviewer: using model ${opts.model}`);
         } catch {
           const defaultName = session.model
             ? `${session.model.provider}/${session.model.id}`
             : "unknown";
-          log(`reviewer: model ${opts.model} has no API key. Falling back to ${defaultName}`);
+          rlog(`reviewer: model ${opts.model} has no API key. Falling back to ${defaultName}`);
           effectiveModel = defaultName;
           opts.onActivity?.(`default model: ${defaultName}`);
         }
@@ -218,7 +223,7 @@ export async function runReviewSession(prompt: string, opts: ReviewOptions): Pro
         const defaultName = session.model
           ? `${session.model.provider}/${session.model.id}`
           : "unknown";
-        log(`reviewer: model ${opts.model} not found. Falling back to ${defaultName}`);
+        rlog(`reviewer: model ${opts.model} not found. Falling back to ${defaultName}`);
         effectiveModel = defaultName;
         opts.onActivity?.(`default model: ${defaultName}`);
       }
@@ -229,7 +234,7 @@ export async function runReviewSession(prompt: string, opts: ReviewOptions): Pro
   type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
   const thinkingLevel = (opts.thinkingLevel ?? "off") as ThinkingLevel;
   session.setThinkingLevel(thinkingLevel);
-  log(`reviewer: thinking level = ${thinkingLevel}`);
+  rlog(`reviewer: thinking level = ${thinkingLevel}`);
 
   let currentText = ""; // always holds the latest assistant message (reset on message_start)
   let reviewText = ""; // set once after main sendPrompt completes; preserved through retries
@@ -256,7 +261,7 @@ export async function runReviewSession(prompt: string, opts: ReviewOptions): Pro
       };
       toolCalls.push(call);
       const activity = formatActivity(name, args);
-      log(`reviewer tool: ${activity}`);
+      rlog(`reviewer tool: ${activity}`);
       opts.onActivity?.(activity);
       // Emit structured tool call for display widget
       const targetPath =
@@ -301,7 +306,7 @@ export async function runReviewSession(prompt: string, opts: ReviewOptions): Pro
 
       timeoutId = setTimeout(() => {
         if (settled) return;
-        log(`reviewer: timed out after ${timeoutMs / 1000}s`);
+        rlog(`reviewer: timed out after ${timeoutMs / 1000}s`);
         settled = true;
         session.abort().then(
           () => reject(new Error("Review timed out")),
@@ -332,10 +337,10 @@ export async function runReviewSession(prompt: string, opts: ReviewOptions): Pro
 
   let verdict: "lgtm" | "issues" | null = null;
   try {
-    log(`reviewer: session.prompt() starting`);
+    rlog(`reviewer: session.prompt() starting`);
     try {
       await sendPrompt(prompt, MAIN_TIMEOUT_MS);
-      log(`reviewer: session.prompt() resolved`);
+      rlog(`reviewer: session.prompt() resolved`);
     } catch (err) {
       // Preserve any partial text we streamed before the failure so the
       // structured log still captures it. Re-throw so caller sees the error.
@@ -352,7 +357,7 @@ export async function runReviewSession(prompt: string, opts: ReviewOptions): Pro
     let retries = 0;
     while (!verdict && retries < MAX_VERDICT_RETRIES) {
       retries++;
-      log(`reviewer: no verdict tag found, retry ${retries}/${MAX_VERDICT_RETRIES}`);
+      rlog(`reviewer: no verdict tag found, retry ${retries}/${MAX_VERDICT_RETRIES}`);
       opts.onActivity?.(`retry ${retries}: asking for verdict`);
       const followUp =
         `Your previous response did not include a verdict tag. ` +
@@ -367,7 +372,9 @@ export async function runReviewSession(prompt: string, opts: ReviewOptions): Pro
         // Propagate cancellation — don't silently swallow user intent
         if (err?.message === "Review cancelled") throw err;
         // Other retry failures: keep reviewText (from main prompt) and fall back to default verdict
-        log(`reviewer: retry ${retries} failed (${err?.message ?? err}), using current reviewText`);
+        rlog(
+          `reviewer: retry ${retries} failed (${err?.message ?? err}), using current reviewText`,
+        );
         break;
       }
       verdict = parseVerdict(currentText);
@@ -375,7 +382,7 @@ export async function runReviewSession(prompt: string, opts: ReviewOptions): Pro
 
     if (!verdict) {
       // After all retries, default to ISSUES_FOUND (safer to show findings than swallow them)
-      log(`reviewer: no verdict after ${MAX_VERDICT_RETRIES} retries, defaulting to ISSUES_FOUND`);
+      rlog(`reviewer: no verdict after ${MAX_VERDICT_RETRIES} retries, defaulting to ISSUES_FOUND`);
       verdict = "issues";
     }
   } finally {
@@ -387,7 +394,7 @@ export async function runReviewSession(prompt: string, opts: ReviewOptions): Pro
   const isLgtm = verdict === "lgtm";
   const durationMs = Date.now() - startTime;
 
-  log(
+  rlog(
     `reviewer: done in ${(durationMs / 1000).toFixed(1)}s | ` +
       `prompt=${(prompt.length / 1000).toFixed(1)}k | ` +
       `raw=${reviewText.length}c | ` +
@@ -395,11 +402,12 @@ export async function runReviewSession(prompt: string, opts: ReviewOptions): Pro
       `tools=${toolCalls.length} | ` +
       `lgtm=${isLgtm}`,
   );
-  log(`reviewer raw response:\n${reviewText}`);
+  rlog(`reviewer raw response:\n${reviewText}`);
 
   // Structured review record
   const reviewPath = logReview({
     timestamp: startedAt,
+    reviewId: opts.reviewId,
     durationMs,
     model: effectiveModel,
     thinkingLevel,
@@ -410,7 +418,7 @@ export async function runReviewSession(prompt: string, opts: ReviewOptions): Pro
     filesReviewed: opts.filesReviewed ?? [],
     toolCalls,
   });
-  if (reviewPath) log(`reviewer: wrote structured record ${reviewPath}`);
+  if (reviewPath) rlog(`reviewer: wrote structured record ${reviewPath}`);
 
   return {
     text: cleanedText,

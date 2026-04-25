@@ -541,16 +541,18 @@ export default function (pi: ExtensionAPI) {
           showLoopCount: outcome.senior.loopInfo,
           reviewedFiles: outcome.files,
           triggerTurn: !hasArchitect,
+          reviewId: outcome.senior.reviewId,
         });
 
         if (!outcome.architect) return;
 
         const architectResult = outcome.architect.result;
+        const architectIdFooter = `\n\n_review-id: \`${outcome.architect.reviewId}\`_`;
         if (architectResult.isLgtm) {
           pi.sendMessage(
             {
               customType: "code-review",
-              content: `🏗️ **Architect Review**\n\nFinal architecture review found no issues. Everything fits together.\n\nIf you were waiting to push until after reviews were done — all reviews are done, no issues found. Safe to push.`,
+              content: `🏗️ **Architect Review**\n\nFinal architecture review found no issues. Everything fits together.${architectIdFooter}\n\nIf you were waiting to push until after reviews were done — all reviews are done, no issues found. Safe to push.`,
               display: true,
             },
             { triggerTurn: true, deliverAs: "followUp" },
@@ -559,7 +561,7 @@ export default function (pi: ExtensionAPI) {
           pi.sendMessage(
             {
               customType: "code-review",
-              content: `🏗️ **Architect Review**\n\nFinal architecture review found potential issues:\n\n${architectResult.text}\n\nPlease review these findings. These are big-picture concerns that individual reviews may have missed.\n\n⚠️ **Do NOT push to remote yet.** Fix any issues first.`,
+              content: `🏗️ **Architect Review**\n\nFinal architecture review found potential issues:\n\n${architectResult.text}${architectIdFooter}\n\nPlease review these findings. These are big-picture concerns that individual reviews may have missed.\n\n⚠️ **Do NOT push to remote yet.** Fix any issues first.`,
               display: true,
             },
             { triggerTurn: true, deliverAs: "followUp" },

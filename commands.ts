@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
 import { type AutoReviewSettings, configDirs } from "./settings";
 import { buildReviewPrompt } from "./prompt";
-import { clampCommitCount, shouldDiffAllCommits, truncateDiff } from "./helpers";
+import { clampCommitCount, createReviewId, shouldDiffAllCommits, truncateDiff } from "./helpers";
 import { runReviewSession } from "./reviewer";
 import { sendReviewResult } from "./message-sender";
 import { isBinaryPath } from "./changes";
@@ -66,6 +66,7 @@ export function registerReviewCommands(opts: RegisterCommandsOptions): ManualRev
     signal: AbortSignal,
     cwd: string,
     filesReviewed: string[],
+    reviewId: string,
     onActivity?: (desc: string) => void,
     onToolCall?: (toolName: string, targetPath: string | null) => void,
   ) {
@@ -77,6 +78,7 @@ export function registerReviewCommands(opts: RegisterCommandsOptions): ManualRev
       thinkingLevel: settings.thinkingLevel,
       timeoutMs: Math.max(settings.reviewTimeoutMs, filesReviewed.length * 120_000),
       filesReviewed,
+      reviewId,
       onActivity,
       onToolCall,
     };
@@ -197,13 +199,15 @@ export function registerReviewCommands(opts: RegisterCommandsOptions): ManualRev
 
         const prompt = `${buildReviewPrompt(opts.getAutoReviewRules(), opts.getCustomRules(), opts.getLastUserMessage())}\n\n---\n\nReview the following git diff (${commitLabel}):\n\nCommits:\n${commitLog}\n\nDiff:\n\`\`\`diff\n${truncatedDiff}\n\`\`\``;
         throwIfCancelled(signal);
+        const reviewId = createReviewId();
+        log(`[${reviewId}] manual /review ${effectiveCount}: ${changedFiles.length} files`);
         const { onActivity, onToolCall } = opts.startReviewWidget(ctx, changedFiles);
         const result = await runReviewSession(
           prompt,
-          buildReviewOptions(signal, ctx.cwd, changedFiles, onActivity, onToolCall),
+          buildReviewOptions(signal, ctx.cwd, changedFiles, reviewId, onActivity, onToolCall),
         );
 
-        sendReviewResult(opts.pi, result, commitLabel);
+        sendReviewResult(opts.pi, result, commitLabel, { reviewId });
       } catch (err: any) {
         if (err?.message === "Review cancelled") {
           ctx.ui.notify("Review cancelled", "info");
@@ -409,13 +413,15 @@ export function registerReviewCommands(opts: RegisterCommandsOptions): ManualRev
         });
 
         throwIfCancelled(signal);
+        const reviewId = createReviewId();
+        log(`[${reviewId}] manual /review-all: ${fullPaths.length} files`);
         const { onActivity, onToolCall } = opts.startReviewWidget(ctx, fullPaths);
         const result = await runReviewSession(
           prompt,
-          buildReviewOptions(signal, ctx.cwd, fullPaths, onActivity, onToolCall),
+          buildReviewOptions(signal, ctx.cwd, fullPaths, reviewId, onActivity, onToolCall),
         );
 
-        sendReviewResult(opts.pi, result, "all changes");
+        sendReviewResult(opts.pi, result, "all changes", { reviewId });
       } catch (err: any) {
         if (err?.message === "Review cancelled") {
           ctx.ui.notify("Review cancelled", "info");

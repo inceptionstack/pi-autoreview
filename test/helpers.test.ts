@@ -1,5 +1,18 @@
 import { describe, it, expect } from "vitest";
-import { clampCommitCount, shouldDiffAllCommits, truncateDiff } from "../helpers";
+import { clampCommitCount, createReviewId, shouldDiffAllCommits, truncateDiff } from "../helpers";
+
+describe("createReviewId", () => {
+  it("createReviewId_Default_ReturnsExpectedFormat", () => {
+    const id = createReviewId();
+    expect(id).toMatch(/^r-[a-f0-9]{8}$/);
+  });
+
+  it("createReviewId_CalledMultipleTimes_ReturnsDistinctValues", () => {
+    const ids = new Set(Array.from({ length: 100 }, () => createReviewId()));
+    // 100 random 32-bit IDs should not collide; if they do, something is wrong.
+    expect(ids.size).toBe(100);
+  });
+});
 
 describe("clampCommitCount", () => {
   it("clampCommitCount_RequestedWithinRange_ReturnsRequestedCount", () => {

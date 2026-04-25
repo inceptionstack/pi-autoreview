@@ -2,6 +2,17 @@
  * helpers.ts — Extracted pure functions for testability
  */
 
+import { randomBytes } from "node:crypto";
+
+/**
+ * Generate a short unique ID for a review cycle.
+ * Format: `r-` + 8 lowercase hex chars (32 bits, ~4B possible values).
+ * Enough uniqueness for debugging/correlation within a session; not cryptographic.
+ */
+export function createReviewId(): string {
+  return `r-${randomBytes(4).toString("hex")}`;
+}
+
 /**
  * Clamp requested commit count to available commits.
  * Returns the effective count and whether it was clamped.

@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { type ContentSizeLimits, FALLBACK_LIMITS, type ReviewContent } from "./context";
 import { hasFileChanges, isFormattingOnlyTurn, collectModifiedPaths } from "./changes";
 import type { TrackedToolCall } from "./changes";
+import { createReviewId } from "./helpers";
 import { buildReviewPrompt } from "./prompt";
 import type { AutoReviewSettings } from "./settings";
 import { runArchitectReview, shouldRunArchitectReview } from "./architect";
@@ -15,6 +16,8 @@ export type ReviewStepResult = {
   result: ReviewResult;
   label?: string;
   loopInfo?: string;
+  /** Unique id for this review step (senior review cycle or architect review). */
+  reviewId: string;
 };
 
 export type ReviewOutcome =
@@ -152,6 +155,11 @@ export class ReviewOrchestrator {
     this.isReviewingValue = true;
     this.reviewAbort = new AbortController();
 
+    const seniorReviewId = createReviewId();
+    log(
+      `[${seniorReviewId}] review cycle started (loop ${this.loopCount}/${input.settings.maxReviewLoops})`,
+    );
+
     try {
       let best = await this.buildContent(input);
 
@@ -160,32 +168,36 @@ export class ReviewOrchestrator {
         best.files.length === 0 ||
         best.content.trim().length < MIN_REVIEW_CONTENT_LENGTH
       ) {
-        log("no meaningful changes, skipping");
+        log(`[${seniorReviewId}] no meaningful changes, skipping`);
         // Previous issues are resolved (files deleted/changes gone) — clear indicators
         this.lastReviewHadIssues = false;
         this.loopCount = 0;
         return { type: "skipped", reason: "no_meaningful_changes" };
       }
 
-      log("best:", { label: best.label, files: best.files, contentLen: best.content.length });
+      log(`[${seniorReviewId}] best:`, {
+        label: best.label,
+        files: best.files,
+        contentLen: best.content.length,
+      });
 
       const contentHash = hashContent(best.content);
       if (contentHash === this.lastReviewedContentHash) {
-        log("Skipping — same content as last review");
+        log(`[${seniorReviewId}] Skipping — same content as last review`);
         return { type: "skipped", reason: "duplicate_content" };
       }
 
       input.onContentReady?.(best.files, this.loopCount);
       log(
-        `Reviewing ${best.files.length} files via ${best.label || "git diff"}: ${best.files.join(", ")}`,
+        `[${seniorReviewId}] Reviewing ${best.files.length} files via ${best.label || "git diff"}: ${best.files.join(", ")}`,
       );
 
       let result: ReviewResult;
       try {
-        result = await this.runSeniorReview(input, best);
+        result = await this.runSeniorReview(input, best, seniorReviewId);
       } catch (retryErr: any) {
         if (!isContextOverflowError(retryErr)) throw retryErr;
-        log("Context overflow, retrying with fallback limits");
+        log(`[${seniorReviewId}] Context overflow, retrying with fallback limits`);
         input.onActivity?.("retrying with smaller context…");
         const smallBest = await this.buildContent(input, FALLBACK_LIMITS);
         if (
@@ -193,19 +205,19 @@ export class ReviewOrchestrator {
           smallBest.files.length === 0 ||
           smallBest.content.trim().length < MIN_REVIEW_CONTENT_LENGTH
         ) {
-          log("Fallback content too small, skipping review");
+          log(`[${seniorReviewId}] Fallback content too small, skipping review`);
           this.lastReviewHadIssues = false;
           this.loopCount = 0;
           return { type: "skipped", reason: "fallback_too_small" };
         }
         best = smallBest;
-        result = await this.runSeniorReview(input, best);
+        result = await this.runSeniorReview(input, best, seniorReviewId);
       }
 
       // Check for late cancellation: if abort fired while runSeniorReview was
       // settling, discard the result instead of feeding it back to the agent.
       if (this.reviewAbort?.signal.aborted) {
-        log("Review cancelled after review completed (race window)");
+        log(`[${seniorReviewId}] Review cancelled after review completed (race window)`);
         return { type: "cancelled" };
       }
 
@@ -214,7 +226,12 @@ export class ReviewOrchestrator {
       if (best.isGitBased) this.sessionHasGitContent = true;
       this.lastReviewedContentHash = hashContent(best.content);
 
-      const senior: ReviewStepResult = { result, label: "", loopInfo: undefined };
+      const senior: ReviewStepResult = {
+        result,
+        label: "",
+        loopInfo: undefined,
+        reviewId: seniorReviewId,
+      };
 
       if (result.isLgtm) {
         this.lastReviewHadIssues = false;
@@ -258,9 +275,10 @@ export class ReviewOrchestrator {
   private async runSeniorReview(
     input: ReviewOrchestratorInput,
     content: ReviewContent,
+    reviewId: string,
   ): Promise<ReviewResult> {
     const prompt = `${buildReviewPrompt(input.autoReviewRules, input.customRules, input.lastUserMessage)}\n\n---\n\n${content.content}`;
-    log("prompt length:", prompt.length);
+    log(`[${reviewId}] prompt length:`, prompt.length);
     const result = await this.runner(prompt, {
       signal: this.requiredSignal(),
       cwd: input.cwd,
@@ -268,10 +286,11 @@ export class ReviewOrchestrator {
       thinkingLevel: input.settings.thinkingLevel,
       timeoutMs: Math.max(input.settings.reviewTimeoutMs, content.files.length * 120_000),
       filesReviewed: content.files,
+      reviewId,
       onActivity: input.onActivity,
       onToolCall: input.onToolCall,
     });
-    log("result:", {
+    log(`[${reviewId}] result:`, {
       isLgtm: result.isLgtm,
       durationMs: result.durationMs,
       textLen: result.text.length,
@@ -299,7 +318,10 @@ export class ReviewOrchestrator {
     if (!willRunArchitect) return undefined;
 
     this.architectDone = true;
-    log(`architect: running — ${this.sessionChangedFiles.size} files reviewed across session`);
+    const architectReviewId = createReviewId();
+    log(
+      `[${architectReviewId}] architect: running — ${this.sessionChangedFiles.size} files reviewed across session`,
+    );
     input.onArchitectStart?.([...this.sessionChangedFiles]);
 
     try {
@@ -310,13 +332,14 @@ export class ReviewOrchestrator {
         model: input.settings.model,
         customRules: input.architectRules,
         sessionChangeSummary: summaryText,
+        reviewId: architectReviewId,
         onActivity: input.onArchitectActivity,
         onToolCall: input.onArchitectToolCall,
       });
-      return { result, label: "Architect Review" };
+      return { result, label: "Architect Review", reviewId: architectReviewId };
     } catch (err: any) {
       if (err?.message === "Review cancelled") throw err;
-      log(`ERROR: Architect review failed: ${err?.message ?? err}`);
+      log(`[${architectReviewId}] ERROR: Architect review failed: ${err?.message ?? err}`);
       return undefined;
     } finally {
       this.sessionChangeSummaries = [];

@@ -85,6 +85,8 @@ export interface ReviewToolCall {
 
 export interface ReviewLogEntry {
   timestamp: string;
+  /** Unique id for this review cycle (e.g. "r-a3f71c08"). Matches the prefix used in review.log lines. */
+  reviewId?: string;
   durationMs: number;
   model: string;
   thinkingLevel: string;
@@ -99,13 +101,16 @@ export interface ReviewLogEntry {
 
 /**
  * Write a structured JSON record for a single review.
- * Filename: <timestamp>_<lgtm|issues>.json
+ * Filename: <timestamp>_<lgtm|issues>[_<reviewId>].json
+ * The reviewId suffix is appended when provided so logs from the same
+ * review cycle can be correlated across review.log and reviews/*.json.
  */
 export function logReview(entry: ReviewLogEntry): string | null {
   ensureDirs();
   const safeTs = entry.timestamp.replace(/[:.]/g, "-");
   const verdict = entry.isLgtm ? "lgtm" : "issues";
-  const filename = `${safeTs}_${verdict}.json`;
+  const idSuffix = entry.reviewId ? `_${entry.reviewId}` : "";
+  const filename = `${safeTs}_${verdict}${idSuffix}.json`;
   const fullPath = join(REVIEWS_DIR, filename);
   try {
     writeFileSync(fullPath, JSON.stringify(entry, null, 2));

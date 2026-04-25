@@ -19,7 +19,13 @@ export function sendReviewResult(
   pi: ExtensionAPI,
   result: ReviewResult,
   label: string,
-  opts?: { showLoopCount?: string; reviewedFiles?: string[]; triggerTurn?: boolean },
+  opts?: {
+    showLoopCount?: string;
+    reviewedFiles?: string[];
+    triggerTurn?: boolean;
+    /** Optional unique id for this review cycle, appended as a footer line for log correlation. */
+    reviewId?: string;
+  },
 ): void {
   // If no files were reviewed and it's LGTM, silently skip — nothing to report.
   // Always show issues even with zero files (tool-call-only reviews can find bugs).
@@ -29,16 +35,22 @@ export function sendReviewResult(
   }
 
   const duration = `${(result.durationMs / 1000).toFixed(1)}s`;
+  const reviewedFiles = opts?.reviewedFiles ?? [];
+  const fileList =
+    reviewedFiles.length > 0
+      ? `\n\n**Reviewed files:**\n\`\`\`\n${formatFileTree(reviewedFiles)}\n\`\`\``
+      : "";
+  // Footer line with the review id, placed under the reviewed-files block (or under the header when no files).
+  // Format: `_review-id: r-abcdef01_` — small/italic, unobtrusive, but visible if scanning.
+  // The agent sees this literally in the message content so logs in ~/.pi/.lgtm can be correlated.
+  const idFooter = opts?.reviewId ? `\n\n_review-id: \`${opts.reviewId}\`_` : "";
+
   if (result.isLgtm) {
     log(`reviewer: LGTM (${duration}, tools=${result.toolCalls.length})`);
-    const fileList =
-      opts?.reviewedFiles && opts.reviewedFiles.length > 0
-        ? `\n\n**Reviewed files:**\n\`\`\`\n${formatFileTree(opts.reviewedFiles)}\n\`\`\``
-        : "";
     pi.sendMessage(
       {
         customType: "code-review",
-        content: `✅ **Automated Code Review**${label ? ` (${label})` : ""} — ${duration}\n\nReview found no issues. Looks good!${fileList}\n\nIf you were waiting to push until after reviews were done — all reviews are done, no issues found. Safe to push.`,
+        content: `✅ **Automated Code Review**${label ? ` (${label})` : ""} — ${duration}\n\nReview found no issues. Looks good!${fileList}${idFooter}\n\nIf you were waiting to push until after reviews were done — all reviews are done, no issues found. Safe to push.`,
         display: true,
       },
       { triggerTurn: opts?.triggerTurn ?? true, deliverAs: "followUp" },
@@ -46,14 +58,10 @@ export function sendReviewResult(
   } else {
     log(`reviewer: issues found (${duration}, tools=${result.toolCalls.length})`);
     const loopInfo = opts?.showLoopCount ? ` (${opts.showLoopCount})` : "";
-    const fileList =
-      opts?.reviewedFiles && opts.reviewedFiles.length > 0
-        ? `\n\n**Reviewed files:**\n\`\`\`\n${formatFileTree(opts.reviewedFiles)}\n\`\`\``
-        : "";
     pi.sendMessage(
       {
         customType: "code-review",
-        content: `🔍 **Automated Code Review**${loopInfo || (label ? ` (${label})` : "")} — ${duration}\n\nA separate reviewer examined your recent changes and found potential issues:\n\n${result.text}${fileList}\n\nPlease review these findings. If any are valid, fix them. If they're false positives, briefly explain why and move on.\n\n⚠️ **Do NOT push to remote yet.** Fix any issues first. Do NOT push after fixing either — a new review cycle will check your fixes automatically.`,
+        content: `🔍 **Automated Code Review**${loopInfo || (label ? ` (${label})` : "")} — ${duration}\n\nA separate reviewer examined your recent changes and found potential issues:\n\n${result.text}${fileList}${idFooter}\n\nPlease review these findings. If any are valid, fix them. If they're false positives, briefly explain why and move on.\n\n⚠️ **Do NOT push to remote yet.** Fix any issues first. Do NOT push after fixing either — a new review cycle will check your fixes automatically.`,
         display: true,
       },
       { triggerTurn: opts?.triggerTurn ?? true, deliverAs: "followUp" },
