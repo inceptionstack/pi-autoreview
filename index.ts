@@ -136,7 +136,8 @@ export default function (pi: ExtensionAPI) {
     // when ctx.cwd isn't itself a git repo.
     pendingArgs.clear();
     fileCapWarned = false;
-    skipStatusShowing = false;
+    // Don't clear skipStatusShowing here — finishReview calls resetTrackingState
+    // right after renderOutcome sets the skip status. Only agent_start clears it.
     updateStatus(ctx);
   }
 
@@ -417,6 +418,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("agent_start", async (_event, ctx) => {
+    skipStatusShowing = false; // New turn — clear skip message from previous turn
     resetTrackingState(ctx);
   });
 
