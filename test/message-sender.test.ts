@@ -1,8 +1,19 @@
 import { describe, it, expect, vi } from "vitest";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
-import { sendReviewResult } from "../message-sender";
+import { formatReviewIdFooter, sendReviewResult } from "../message-sender";
 import type { ReviewResult } from "../reviewer";
+
+describe("formatReviewIdFooter", () => {
+  it("formatReviewIdFooter_WithId_ReturnsItalicCodeLine", () => {
+    expect(formatReviewIdFooter("r-abcdef01")).toBe("\n\n_review-id: `r-abcdef01`_");
+  });
+
+  it("formatReviewIdFooter_NoId_ReturnsEmptyString", () => {
+    expect(formatReviewIdFooter(undefined)).toBe("");
+    expect(formatReviewIdFooter("")).toBe("");
+  });
+});
 
 function makeResult(
   isLgtm: boolean,

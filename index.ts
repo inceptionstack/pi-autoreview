@@ -32,7 +32,7 @@ import {
   loadShortcutSettingsSync,
 } from "./settings";
 import { runReviewSession } from "./reviewer";
-import { sendReviewResult } from "./message-sender";
+import { sendReviewResult, formatReviewIdFooter } from "./message-sender";
 import { type TrackedToolCall, isFileModifyingTool, collectModifiedPaths } from "./changes";
 import { getBestReviewContent } from "./context";
 import { loadIgnorePatterns } from "./ignore";
@@ -547,7 +547,7 @@ export default function (pi: ExtensionAPI) {
         if (!outcome.architect) return;
 
         const architectResult = outcome.architect.result;
-        const architectIdFooter = `\n\n_review-id: \`${outcome.architect.reviewId}\`_`;
+        const architectIdFooter = formatReviewIdFooter(outcome.architect.reviewId);
         if (architectResult.isLgtm) {
           pi.sendMessage(
             {

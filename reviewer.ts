@@ -19,7 +19,7 @@ import {
   type AgentSessionEvent,
 } from "@mariozechner/pi-coding-agent";
 
-import { log, logReview, type ReviewToolCall } from "./logger";
+import { log, logReview, safeStringify, type ReviewToolCall } from "./logger";
 
 export interface ReviewResult {
   /** Cleaned review text shown to the user. */
@@ -165,8 +165,9 @@ export async function runReviewSession(prompt: string, opts: ReviewOptions): Pro
   const startTime = Date.now();
   const startedAt = new Date().toISOString();
   const idPrefix = opts.reviewId ? `[${opts.reviewId}] ` : "";
-  const rlog = (...args: any[]) =>
-    log(idPrefix + args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" "));
+  // Use safeStringify (same circular-ref-safe serializer as log()) so rlog matches
+  // log()'s safety contract even for non-string arguments.
+  const rlog = (...args: any[]) => log(idPrefix + args.map(safeStringify).join(" "));
   rlog(`reviewer: starting (prompt=${(prompt.length / 1000).toFixed(1)}k chars, cwd=${opts.cwd})`);
 
   let authStorage: ReturnType<typeof AuthStorage.create>;

@@ -59,6 +59,8 @@ function safeStringify(a: any): string {
   }
 }
 
+export { safeStringify };
+
 export function log(...args: any[]) {
   ensureDirs();
   const line = `[${ts()}] ${args.map(safeStringify).join(" ")}\n`;

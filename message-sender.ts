@@ -4,6 +4,19 @@ import { log } from "./logger";
 import type { ReviewResult } from "./reviewer";
 
 /**
+ * Format a review-id footer line for appending to a code-review message.
+ * Returns "" when no id is supplied, so call sites can unconditionally inline it.
+ *
+ * Single source of truth for the footer format — callers outside message-sender
+ * (e.g. the architect message in index.ts) should use this helper rather than
+ * inlining the markup, so the format stays consistent everywhere.
+ */
+export function formatReviewIdFooter(reviewId: string | undefined): string {
+  if (!reviewId) return "";
+  return `\n\n_review-id: \`${reviewId}\`_`;
+}
+
+/**
  * Format file paths as a compact tree.
  */
 function formatFileTree(files: string[]): string {
@@ -43,7 +56,7 @@ export function sendReviewResult(
   // Footer line with the review id, placed under the reviewed-files block (or under the header when no files).
   // Format: `_review-id: r-abcdef01_` — small/italic, unobtrusive, but visible if scanning.
   // The agent sees this literally in the message content so logs in ~/.pi/.lgtm can be correlated.
-  const idFooter = opts?.reviewId ? `\n\n_review-id: \`${opts.reviewId}\`_` : "";
+  const idFooter = formatReviewIdFooter(opts?.reviewId);
 
   if (result.isLgtm) {
     log(`reviewer: LGTM (${duration}, tools=${result.toolCalls.length})`);
