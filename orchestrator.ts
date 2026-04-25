@@ -161,6 +161,9 @@ export class ReviewOrchestrator {
         best.content.trim().length < MIN_REVIEW_CONTENT_LENGTH
       ) {
         log("no meaningful changes, skipping");
+        // Previous issues are resolved (files deleted/changes gone) — clear indicators
+        this.lastReviewHadIssues = false;
+        this.loopCount = 0;
         return { type: "skipped", reason: "no_meaningful_changes" };
       }
 
