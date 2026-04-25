@@ -257,8 +257,12 @@ function isNonModifyingPart(part: string): boolean {
   if (ALLOWED_NAVIGATION.test(part)) return true;
 
   // Any output redirection to a file means the command modifies files
-  // Exclude fd redirections like 2>&1, 2>/dev/null
-  if (/(?<!\d)>{1,2}[^&]/.test(part)) return false;
+  // Exclude only fd-to-fd redirects like 2>&1 (digit > & digit)
+  if (/>{1,2}/.test(part) && !/^[^>]*\d>&\d[^>]*$/.test(part)) {
+    // Has a > or >> that isn't purely a fd-to-fd redirect
+    const withoutFdRedirects = part.replace(/\d>&\d/g, "");
+    if (/>{1,2}/.test(withoutFdRedirects)) return false;
+  }
 
   // Git VCS read-only operations
   const gitMatch = part.match(/^git(?:\s+-C\s+\S+)?\s+(\w[\w-]*)/);

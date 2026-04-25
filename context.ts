@@ -525,51 +525,50 @@ export async function getContentFromToolCalls(
   // files they merely inspected.
   if (reviewedFiles.length > 0) {
     const verified: string[] = [];
-    // Cache git status per directory to avoid repeated calls
-    const statusCache = new Map<string, Set<string> | null>();
+    // Cache git status per git root to avoid redundant calls
+    const rootCache = new Map<string, Set<string> | null>(); // gitRoot → changed files
+    const dirToRoot = new Map<string, string | null>(); // dir → gitRoot (or null)
 
     for (const f of reviewedFiles) {
-      // Find the git root for this file's directory
       const dir = f.includes("/") ? f.slice(0, f.lastIndexOf("/")) || "." : ".";
-      if (!statusCache.has(dir)) {
+
+      // Resolve dir → git root (cached)
+      if (!dirToRoot.has(dir)) {
         const rootCheck = await pi.exec("git", ["-C", dir, "rev-parse", "--show-toplevel"], {
           timeout: 3000,
         });
-        if (rootCheck.code === 0) {
-          const root = rootCheck.stdout.trim();
-          // Check if we already have status for this root
-          const existingKey = [...statusCache.entries()].find(
-            ([, v]) => v !== null && statusCache.get(root) === v,
-          );
-          if (existingKey) {
-            statusCache.set(dir, statusCache.get(existingKey[0])!);
-          } else {
-            const gitStatus = await pi.exec("git", ["-C", root, "status", "--porcelain", "-uall"], {
-              timeout: 5000,
-            });
-            const changed =
-              gitStatus.code === 0
-                ? new Set(
-                    gitStatus.stdout
-                      .trim()
-                      .split("\n")
-                      .filter(Boolean)
-                      .map((line) => {
-                        const rel = line.slice(3).trim();
-                        return `${root}/${rel}`;
-                      }),
-                  )
-                : null; // git failed — treat as non-git
-            statusCache.set(dir, changed);
-          }
-        } else {
-          statusCache.set(dir, null); // Not in a git repo
-        }
+        dirToRoot.set(dir, rootCheck.code === 0 ? rootCheck.stdout.trim() : null);
+      }
+      const root = dirToRoot.get(dir) ?? null;
+
+      if (root === null) {
+        // Not in a git repo — keep using heuristic
+        verified.push(f);
+        continue;
       }
 
-      const changed = statusCache.get(dir) ?? null;
+      // Get git status for this root (cached)
+      if (!rootCache.has(root)) {
+        const gitStatus = await pi.exec("git", ["-C", root, "status", "--porcelain", "-uall"], {
+          timeout: 5000,
+        });
+        rootCache.set(
+          root,
+          gitStatus.code === 0
+            ? new Set(
+                gitStatus.stdout
+                  .trim()
+                  .split("\n")
+                  .filter(Boolean)
+                  .map((line) => `${root}/${line.slice(3).trim()}`),
+              )
+            : null,
+        );
+      }
+      const changed = rootCache.get(root) ?? null;
+
       if (changed === null) {
-        // Not in a git repo — keep using heuristic
+        // git status failed — keep using heuristic
         verified.push(f);
       } else if (
         changed.has(f) ||
