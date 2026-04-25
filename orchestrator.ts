@@ -56,6 +56,8 @@ export interface ReviewOrchestratorInput {
   onArchitectToolCall?: (toolName: string, targetPath: string | null) => void;
   onContentReady?: (files: string[], loopCount: number) => void;
   onArchitectStart?: (files: string[]) => void;
+  /** Check if a file still exists on disk. Used to prune deleted files from architect review. */
+  fileExists?: (path: string) => Promise<boolean>;
 }
 
 export interface ReviewOrchestratorOptions {
@@ -153,7 +155,11 @@ export class ReviewOrchestrator {
     try {
       let best = await this.buildContent(input);
 
-      if (!best || best.content.trim().length < MIN_REVIEW_CONTENT_LENGTH) {
+      if (
+        !best ||
+        best.files.length === 0 ||
+        best.content.trim().length < MIN_REVIEW_CONTENT_LENGTH
+      ) {
         log("no meaningful changes, skipping");
         return { type: "skipped", reason: "no_meaningful_changes" };
       }
@@ -179,7 +185,11 @@ export class ReviewOrchestrator {
         log("Context overflow, retrying with fallback limits");
         input.onActivity?.("retrying with smaller context…");
         const smallBest = await this.buildContent(input, FALLBACK_LIMITS);
-        if (!smallBest || smallBest.content.trim().length < MIN_REVIEW_CONTENT_LENGTH) {
+        if (
+          !smallBest ||
+          smallBest.files.length === 0 ||
+          smallBest.content.trim().length < MIN_REVIEW_CONTENT_LENGTH
+        ) {
           log("Fallback content too small, skipping review");
           return { type: "skipped", reason: "fallback_too_small" };
         }
@@ -267,6 +277,15 @@ export class ReviewOrchestrator {
   private async runArchitectIfNeeded(
     input: ReviewOrchestratorInput,
   ): Promise<ReviewStepResult | undefined> {
+    // Prune deleted files from session accumulator before checking architect trigger
+    if (input.fileExists) {
+      const existing = new Set<string>();
+      for (const f of this.sessionChangedFiles) {
+        if (await input.fileExists(f)) existing.add(f);
+      }
+      this.sessionChangedFiles = existing;
+    }
+
     const willRunArchitect =
       input.settings.architectEnabled &&
       !this.architectDone &&

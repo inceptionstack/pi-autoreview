@@ -320,6 +320,10 @@ export default function (pi: ExtensionAPI) {
             log(`WARNING stack: ${err?.stack ?? "(no stack)"}`);
           }
         },
+        fileExists: async (path) => {
+          const result = await pi.exec("test", ["-e", path], { timeout: 3000 });
+          return result.code === 0;
+        },
       });
 
       if (outcome.type === "max_loops" && ctx.hasUI) {

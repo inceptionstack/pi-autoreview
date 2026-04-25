@@ -518,7 +518,8 @@ export async function getContentFromToolCalls(
     }
   }
 
-  if (reviewedFiles.length === 0 && !changeSummary.trim()) return null;
+  // No readable files remain — a bash summary alone (e.g. "rm foo.ts") is not reviewable content
+  if (reviewedFiles.length === 0) return null;
 
   const fileSection = reviewedFiles.map((f) => `### ${f}\n**Full path:** \`${f}\``).join("\n\n");
 
