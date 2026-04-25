@@ -146,9 +146,11 @@ src/vendor/**
 ### Status bar (bottom of pi)
 
 - `senior-review on (Alt+R toggle)` — idle, no pending files
-- `senior-review on · will review 3 files (Alt+R toggle)` — edits accumulating
-- `senior-review reviewing… [2/100] model-name (/cancel-review)` — reviewer running
-- `senior-review off (Alt+R toggle)` — disabled
+- `senior-review on 🔒 push blocked · will review 3 files (Alt+R toggle)` — edits accumulating, push blocked
+- `senior-review reviewing… 🔒 push blocked (/cancel-review)` — reviewer running
+- `senior-review on issues found 🔒 push blocked (Alt+R toggle)` — review found issues
+- `senior-review skipped — no files to review` — nothing to review after fix turn
+- `senior-review off (Alt+R toggle)` — disabled, push guard off
 
 ### Review progress widget
 
@@ -233,6 +235,9 @@ The extension automatically blocks `git push` when:
 
 - **A review is in progress** — wait for the review to complete
 - **The last review found issues** — fix the issues and get LGTM first
+- **Files have been modified but not yet reviewed** — wait for the review to start and complete
+
+The status bar shows `🔒 push blocked` whenever push would be blocked.
 
 The block applies to any `bash` tool call matching `git push` (including `git -C <dir> push`, `git push origin main`, etc.). The agent sees a clear "Push blocked" message explaining why.
 
@@ -241,6 +246,7 @@ The block clears automatically when:
 - The next review returns **LGTM**
 - The review **skips** with "no files to review" (issues resolved by deletion/revert)
 - You do a **full reset** (`Ctrl+Alt+Shift+R`)
+- You **disable** review (`Alt+R` toggle) — push guard is off when review is off
 
 No git hooks are needed — this is enforced at the extension level via pi's `tool_call` event interception.
 
