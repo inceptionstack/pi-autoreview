@@ -428,35 +428,34 @@ export default function (pi: ExtensionAPI) {
 
   // ── Push guard: block git push when review is needed ──
 
+  /** Determine why push should be blocked, or null if push is allowed. */
+  function getPushBlockReason(): string | null {
+    if (!orchestrator.isEnabled) return null;
+    if (orchestrator.isReviewing) return "a code review is in progress";
+    if (orchestrator.lastHadIssues) return "the last review found unresolved issues";
+    if (hasPendingFiles()) return "files have been modified but not yet reviewed";
+    return null;
+  }
+
   pi.on("tool_call", async (event, _ctx) => {
     if (!isToolCallEventType("bash", event)) return;
-    if (!orchestrator.isEnabled) return; // Review disabled — don't block pushes
     const cmd = event.input.command ?? "";
-    if (!/\bgit(?:\s+-C\s+\S+)?\s+push\b/.test(cmd)) return;
+    // Match push as a git subcommand (allows flags like --no-pager, -C, -c between git and push)
+    // Excludes git stash push (stash operation, not remote push)
+    if (!/\bgit\s+(?:\S+\s+)*?push\b/.test(cmd) || /\bgit\s+stash\s+push\b/.test(cmd)) return;
 
-    if (orchestrator.isReviewing) {
-      return {
-        block: true,
-        reason:
-          "Push blocked: a code review is in progress. Wait for the review to complete before pushing.",
-      };
-    }
+    const reason = getPushBlockReason();
+    if (!reason) return;
 
-    if (orchestrator.lastHadIssues) {
-      return {
-        block: true,
-        reason:
-          "Push blocked: the last code review found issues that haven't been resolved yet. Fix the issues and get LGTM before pushing.",
-      };
-    }
+    const hasOtherCommands = /&&|\|\||;/.test(cmd);
+    const hint = hasOtherCommands
+      ? " Your command had other parts chained with the push — re-run them without the push."
+      : "";
 
-    if (hasPendingFiles()) {
-      return {
-        block: true,
-        reason:
-          "Push blocked: files have been modified but not yet reviewed. Wait for the review to complete before pushing.",
-      };
-    }
+    return {
+      block: true,
+      reason: `Push blocked: ${reason}.${hint} Push will be allowed after all reviews pass.`,
+    };
   });
 
   pi.on("before_agent_start", async (event) => {
@@ -527,7 +526,7 @@ export default function (pi: ExtensionAPI) {
         pi.sendMessage(
           {
             customType: "code-review",
-            content: `⚠️ **Senior review failed**\n\n${errMsg}\n\nThe review could not complete. Check the model configuration in .senior-review/settings.json.`,
+            content: `⚠️ **Senior review failed**\n\n${errMsg}\n\nThe review could not complete. Check the logs in ~/.pi/.senior-review/review.log for details. If this is a timeout, consider increasing reviewTimeoutMs in .senior-review/settings.json.`,
             display: true,
           },
           { triggerTurn: false, deliverAs: "followUp" },

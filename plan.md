@@ -4,6 +4,20 @@
 
 ## Open Issues
 
+### Extract PushGuard class from index.ts
+
+**Problem:** The push guard logic (regex matching, command stripping, block reason detection, status bar integration) is inline in index.ts's `tool_call` handler. It mixes concerns: command parsing, review state querying, command mutation, and agent notification.
+
+**Fix:** Extract a `PushGuard` class (or module `push-guard.ts`) that owns:
+
+- `shouldBlock(command): { blocked: boolean; reason?: string }`
+- `stripPush(command): { modified: string; hadPush: boolean }`
+- `getBlockReason(): string | null`
+
+index.ts wires it up via `tool_call` but the logic is testable independently.
+
+**Status:** [ ]
+
 ### B3. `buildRepoContext` ignores agent-modified file list — reviews wrong files
 
 **Problem:** When agent creates new (untracked) files via `write`, `buildRepoContext` runs `git diff HEAD` on the entire repo. If the working tree has no staged/modified _tracked_ files, the diff is empty and the code falls through to the `git diff HEAD~1 HEAD` (last commit) branch. This branch always has content, so it "succeeds" — but it reviews the _last commit's_ files instead of the untracked files the agent just created.

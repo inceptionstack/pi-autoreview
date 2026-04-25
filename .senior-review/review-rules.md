@@ -1,4 +1,5 @@
 - Code should use Clean Code rules and DRY principles. Do not repeat yourself.
+- **Actively flag extraction opportunities**: when a function, event handler, or class is doing multiple unrelated things, recommend extracting into a separate module/class. This is the most important review criterion — it's easy to add code, hard to keep it organized.
 
 ## Correctness & Bugs
 
