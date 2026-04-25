@@ -1,7 +1,7 @@
 /**
- * logger.ts — File logger for pi-senior-review
+ * logger.ts — File logger for pi-lgtm
  *
- * Two outputs under ~/.pi/.senior-review/:
+ * Two outputs under ~/.pi/.lgtm/:
  *   review.log       — free-text timestamped lines (rotates at 1MB)
  *   reviews/*.json   — one structured JSON file per completed review
  *
@@ -12,7 +12,7 @@ import { appendFileSync, mkdirSync, statSync, renameSync, writeFileSync } from "
 import { join } from "node:path";
 import { homedir } from "node:os";
 
-const LOG_DIR = join(homedir(), ".pi", ".senior-review");
+const LOG_DIR = join(homedir(), ".pi", ".lgtm");
 const LOG_FILE = join(LOG_DIR, "review.log");
 const LOG_OLD = join(LOG_DIR, "review.log.old");
 const REVIEWS_DIR = join(LOG_DIR, "reviews");

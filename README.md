@@ -1,17 +1,17 @@
-# pi-senior-review
+# pi-lgtm
 
 A [pi](https://github.com/badlogic/pi-mono) extension that automatically reviews code changes after each agent turn using a separate pi reviewer instance.
 
 ## Install
 
 ```bash
-pi install npm:@inceptionstack/pi-senior-review
+pi install npm:@inceptionstack/pi-lgtm
 ```
 
 Or manually:
 
 ```bash
-cp index.ts ~/.pi/agent/extensions/pi-senior-review.ts
+cp index.ts ~/.pi/agent/extensions/pi-lgtm.ts
 ```
 
 ## How it works
@@ -58,14 +58,14 @@ The reviewer checks for:
 
 Config files are loaded from two locations. **Local takes precedence over global:**
 
-1. `cwd/.senior-review/` — project-specific config
-2. `~/.pi/.senior-review/` — global defaults
+1. `cwd/.lgtm/` — project-specific config
+2. `~/.pi/.lgtm/` — global defaults
 
 All config files are optional. If missing, sensible defaults are used.
 
 Use `/scaffold-review-files` to generate config templates.
 
-### `.senior-review/settings.json`
+### `.lgtm/settings.json`
 
 ```json
 {
@@ -91,7 +91,7 @@ Use `/scaffold-review-files` to generate config templates.
 
 > **Note:** `roundupEnabled` is accepted as a legacy alias for `architectEnabled`.
 
-### `.senior-review/review-rules.md`
+### `.lgtm/review-rules.md`
 
 Custom review rules appended to the reviewer prompt. Only include review criteria — the surrounding prompt (tools, budget, workflow, response format) is handled automatically.
 
@@ -107,13 +107,13 @@ Custom review rules appended to the reviewer prompt. Only include review criteri
 - No secrets in code — use environment variables
 ```
 
-Use `/add-review-rule <text>` to quickly prepend rules, or `/senior-edit-review-rules` to open the file in pi's editor.
+Use `/add-review-rule <text>` to quickly prepend rules, or `/lgtm-rules` to open the file in pi's editor.
 
-### `.senior-review/auto-review.md`
+### `.lgtm/auto-review.md`
 
 Override the "what to review / what not to report" section of the review prompt. The surrounding prompt (tools, budget, workflow, response format) is always included automatically.
 
-### `.senior-review/architect.md`
+### `.lgtm/architect.md`
 
 Custom rules for the architect review (cross-file consistency check):
 
@@ -125,9 +125,9 @@ Custom rules for the architect review (cross-file consistency check):
 - Flag any TODO/FIXME comments added during fix loops
 ```
 
-> **Note:** `.senior-review/roundup.md` is accepted as a legacy fallback.
+> **Note:** `.lgtm/roundup.md` is accepted as a legacy fallback.
 
-### `.senior-review/ignore`
+### `.lgtm/ignore`
 
 Gitignore-style patterns to exclude files from review:
 
@@ -145,12 +145,12 @@ src/vendor/**
 
 ### Status bar (bottom of pi)
 
-- `senior-review on (Alt+R toggle)` — idle, no pending files
-- `senior-review on 🔒 push blocked · will review 3 files (Alt+R toggle)` — edits accumulating, push blocked
-- `senior-review reviewing… 🔒 push blocked (/cancel-review)` — reviewer running
-- `senior-review on issues found 🔒 push blocked (Alt+R toggle)` — review found issues
-- `senior-review skipped — no files to review` — nothing to review after fix turn
-- `senior-review off (Alt+R toggle)` — disabled, push guard off
+- `lgtm on (Alt+R toggle)` — idle, no pending files
+- `lgtm on 🔒 push blocked · will review 3 files (Alt+R toggle)` — edits accumulating, push blocked
+- `lgtm reviewing… 🔒 push blocked (/cancel-review)` — reviewer running
+- `lgtm on issues found 🔒 push blocked (Alt+R toggle)` — review found issues
+- `lgtm skipped — no files to review` — nothing to review after fix turn
+- `lgtm off (Alt+R toggle)` — disabled, push guard off
 
 ### Review progress widget
 
@@ -162,21 +162,21 @@ During reviews, an animated widget appears below the editor showing:
 
 ### Commands
 
-| Command                     | Description                                                        |
-| --------------------------- | ------------------------------------------------------------------ |
-| `/review`                   | Toggle senior-review on/off                                        |
-| `/review N`                 | Review the last N commits                                          |
-| `/review-all`               | Review all changes (pending diff → last commit → all files in cwd) |
-| `/cancel-review`            | Cancel an in-progress review (works during architect review)       |
-| `/scaffold-review-files`    | Create `.senior-review/` config templates in a git repo            |
-| `/senior-edit-review-rules` | Edit `.senior-review/review-rules.md` in pi's built-in editor      |
-| `/add-review-rule <text>`   | Prepend a custom rule to `.senior-review/review-rules.md`          |
+| Command                   | Description                                                        |
+| ------------------------- | ------------------------------------------------------------------ |
+| `/review`                 | Toggle review on/off                                               |
+| `/review N`               | Review the last N commits                                          |
+| `/review-all`             | Review all changes (pending diff → last commit → all files in cwd) |
+| `/cancel-review`          | Cancel an in-progress review (works during architect review)       |
+| `/scaffold-review-files`  | Create `.lgtm/` config templates in a git repo                     |
+| `/lgtm-rules`             | Edit `.lgtm/review-rules.md` in pi's built-in editor               |
+| `/add-review-rule <text>` | Prepend a custom rule to `.lgtm/review-rules.md`                   |
 
 ### Keyboard shortcuts
 
 | Key                | Default  | Configurable     | Action                                              |
 | ------------------ | -------- | ---------------- | --------------------------------------------------- |
-| Toggle shortcut    | `alt+r`  | `toggleShortcut` | Toggle senior-review on/off                         |
+| Toggle shortcut    | `alt+r`  | `toggleShortcut` | Toggle review on/off                                |
 | Cancel shortcut    | _(none)_ | `cancelShortcut` | Cancel in-progress review                           |
 | `ctrl+alt+r`       | built-in | no               | Cancel review (fallback, terminals that support it) |
 | `ctrl+alt+shift+r` | built-in | no               | Full reset: cancel, reset loops, clear all state    |
@@ -193,7 +193,7 @@ During reviews, an animated widget appears below the editor showing:
 
 ### Architect review
 
-After the senior review loop reaches LGTM, an **architect review** triggers automatically when more than one file was reviewed from git across the session. No heuristics or judge gating — it always runs for multi-file changes.
+After the review loop reaches LGTM, an **architect review** triggers automatically when more than one file was reviewed from git across the session. No heuristics or judge gating — it always runs for multi-file changes.
 
 The architect review:
 

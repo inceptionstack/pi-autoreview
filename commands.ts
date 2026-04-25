@@ -109,7 +109,7 @@ export function registerReviewCommands(opts: RegisterCommandsOptions): ManualRev
   registerConfigCommands(opts);
 
   opts.pi.registerCommand("review", {
-    description: "Toggle senior review, or '/review <N>' to review last N commits",
+    description: "Toggle review, or '/review <N>' to review last N commits",
     handler: async (args, ctx) => {
       const trimmed = (args ?? "").trim();
 
@@ -444,7 +444,7 @@ export function registerReviewCommands(opts: RegisterCommandsOptions): ManualRev
 function registerConfigCommands(opts: RegisterCommandsOptions) {
   opts.pi.registerCommand("scaffold-review-files", {
     description:
-      "Create .senior-review/ config templates in a git repo. Usage: /scaffold-review-files [path]",
+      "Create .lgtm/ config templates in a git repo. Usage: /scaffold-review-files [path]",
     handler: async (args, ctx) => {
       const { mkdirSync, writeFileSync, existsSync } = await import("node:fs");
       const { join, resolve } = await import("node:path");
@@ -470,7 +470,7 @@ function registerConfigCommands(opts: RegisterCommandsOptions) {
       }
 
       const gitRoot = gitCheck.stdout.trim();
-      const dir = join(gitRoot, ".senior-review");
+      const dir = join(gitRoot, ".lgtm");
       mkdirSync(dir, { recursive: true });
 
       const files: Record<string, string> = {
@@ -505,8 +505,8 @@ function registerConfigCommands(opts: RegisterCommandsOptions) {
     },
   });
 
-  opts.pi.registerCommand("senior-edit-review-rules", {
-    description: "Edit .senior-review/review-rules.md in pi's built-in editor",
+  opts.pi.registerCommand("lgtm-rules", {
+    description: "Edit .lgtm/review-rules.md in pi's built-in editor",
     handler: async (_args, ctx) => {
       const { readFileSync, writeFileSync, mkdirSync, existsSync } = await import("node:fs");
       const { join } = await import("node:path");
@@ -522,7 +522,7 @@ function registerConfigCommands(opts: RegisterCommandsOptions) {
           try {
             fileContent = readFileSync(candidate, "utf8");
           } catch (err: any) {
-            log(`senior-edit-review-rules: cannot read ${candidate}: ${err?.message}`);
+            log(`lgtm-rules: cannot read ${candidate}: ${err?.message}`);
             if (ctx.hasUI) ctx.ui.notify(`Cannot read ${candidate}: ${err?.message}`, "error");
             return;
           }
@@ -542,7 +542,7 @@ function registerConfigCommands(opts: RegisterCommandsOptions) {
         filePath = join(localDir, "review-rules.md");
         fileContent = SCAFFOLD_REVIEW_RULES;
         writeFileSync(filePath, fileContent);
-        log(`senior-edit-review-rules: created ${filePath}`);
+        log(`lgtm-rules: created ${filePath}`);
       }
 
       if (!ctx.hasUI) return;
@@ -561,13 +561,13 @@ function registerConfigCommands(opts: RegisterCommandsOptions) {
 
       writeFileSync(filePath, edited);
       opts.setCustomRules(edited.trim() || null);
-      log(`senior-edit-review-rules: saved and reloaded ${filePath}`);
+      log(`lgtm-rules: saved and reloaded ${filePath}`);
       ctx.ui.notify(`Saved ${filePath}`, "info");
     },
   });
 
   opts.pi.registerCommand("add-review-rule", {
-    description: "Prepend a custom rule to .senior-review/review-rules.md",
+    description: "Prepend a custom rule to .lgtm/review-rules.md",
     handler: async (args, ctx) => {
       const rule = (args ?? "").trim();
       if (!rule) {

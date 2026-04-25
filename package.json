@@ -1,12 +1,12 @@
 {
-  "name": "@inceptionstack/pi-senior-review",
+  "name": "@inceptionstack/pi-lgtm",
   "version": "0.2.0",
   "type": "module",
-  "description": "Pi extension — senior-level code review after every agent turn",
+  "description": "Pi extension — automatic code review after every agent turn",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/inceptionstack/pi-senior-review.git"
+    "url": "https://github.com/inceptionstack/pi-lgtm.git"
   },
   "keywords": [
     "pi",

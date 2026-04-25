@@ -33,7 +33,7 @@
 
 ### Documentation
 
-- **README** — Rewrote roundup → architect terminology throughout. Added push guard section, updated status bar examples, updated settings table (`architectEnabled`), config files (`.senior-review/architect.md`).
+- **README** — Rewrote roundup → architect terminology throughout. Added push guard section, updated status bar examples, updated settings table (`architectEnabled`), config files (`.lgtm/architect.md`).
 - **AGENTS.md** — Test counts updated (274 tests, 10 files).
 - **plan.md** — Removed stale roundup LLM-judge section, updated test breakdowns.
 

@@ -205,7 +205,7 @@ export class ReviewOrchestrator {
       // Check for late cancellation: if abort fired while runSeniorReview was
       // settling, discard the result instead of feeding it back to the agent.
       if (this.reviewAbort?.signal.aborted) {
-        log("Review cancelled after senior review completed (race window)");
+        log("Review cancelled after review completed (race window)");
         return { type: "cancelled" };
       }
 

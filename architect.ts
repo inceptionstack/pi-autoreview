@@ -2,7 +2,7 @@
  * architect.ts — Final "zoom out" architecture review after mini-review loops complete
  *
  * Triggered automatically when more than 1 file was actively reviewed by the
- * senior-review step. No heuristics or judge gating — if multiple files were
+ * review step. No heuristics or judge gating — if multiple files were
  * touched, an architecture-level review always runs.
  *
  * Looks at the big picture: architecture coherence, cross-file consistency,
@@ -51,8 +51,8 @@ Focus on systemic issues that individual mini-reviews would miss.
 Do NOT repeat issues that were already found and fixed in mini-reviews.`;
 
 /**
- * Load architect review rules from .senior-review/architect.md.
- * Falls back to .senior-review/roundup.md for backwards compatibility.
+ * Load architect review rules from .lgtm/architect.md.
+ * Falls back to .lgtm/roundup.md for backwards compatibility.
  */
 export async function loadArchitectRules(cwd: string): Promise<string | null> {
   // Try new name first, fall back to old name

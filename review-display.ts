@@ -405,7 +405,7 @@ export function startReviewDisplay(
   function redraw() {
     try {
       const lines = buildReviewWidget(state, animFrame, spinnerFrame, boundTheme);
-      boundSetWidget("senior-review-progress", lines, { placement: "belowEditor" });
+      boundSetWidget("lgtm-progress", lines, { placement: "belowEditor" });
     } catch {
       // UI may be stale after session replacement — stop silently
       if (timer) {
@@ -497,7 +497,7 @@ export function startReviewDisplay(
         timer = undefined;
       }
       try {
-        boundSetWidget("senior-review-progress", undefined);
+        boundSetWidget("lgtm-progress", undefined);
       } catch {
         // UI may be stale — ignore
       }

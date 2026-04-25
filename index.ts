@@ -1,24 +1,24 @@
 /**
- * pi-senior-review — Pi extension
+ * pi-lgtm — Pi extension
  *
  * After each agent turn that modifies files, spawns a fresh pi instance
  * to do a code review. Feeds the review feedback back to the main agent
  * as a steering message so it can decide whether to fix anything.
  *
- * Configuration (optional, in cwd/.senior-review/ or ~/.pi/.senior-review/, local takes precedence):
+ * Configuration (optional, in cwd/.lgtm/ or ~/.pi/.lgtm/, local takes precedence):
  *   settings.json       — { "maxReviewLoops": 100, "toggleShortcut": "alt+r", "cancelShortcut": "alt+x" }
  *   review-rules.md     — custom review rules appended to prompt
  *
  * UX:
- *   - Status bar shows senior review on/off + pending file count
+ *   - Status bar shows lgtm on/off + pending file count
  *   - Alt+R toggles review on/off (configurable: toggleShortcut)
  *   - Alt+X or /cancel-review cancels an in-progress review (cancelShortcut configurable, default: none)
  *   - Ctrl+Alt+R also cancels (terminals that support it)
  *   - /review command toggles, /review <N> reviews last N commits
  *
  * Install:
- *   pi install npm:@inceptionstack/pi-senior-review
- *   or: cp index.ts ~/.pi/agent/extensions/pi-senior-review.ts
+ *   pi install npm:@inceptionstack/pi-lgtm
+ *   or: cp index.ts ~/.pi/agent/extensions/pi-lgtm.ts
  */
 
 import { type ExtensionAPI, isToolCallEventType } from "@mariozechner/pi-coding-agent";
@@ -180,7 +180,7 @@ export default function (pi: ExtensionAPI) {
     const ui = safeGetUi(ctx);
     if (!ui) return;
     const theme = ui.theme;
-    const label = theme.fg("accent", "senior-review");
+    const label = theme.fg("accent", "lgtm");
     const state = orchestrator.isEnabled ? theme.fg("success", "on") : theme.fg("dim", "off");
 
     // Determine if push is currently blocked
@@ -246,7 +246,7 @@ export default function (pi: ExtensionAPI) {
     try {
       orchestrator.setEnabled(!orchestrator.isEnabled);
       if (orchestrator.isEnabled) {
-        if (ctx.hasUI) ctx.ui.notify(`Senior review: on`, "info");
+        if (ctx.hasUI) ctx.ui.notify(`Review: on`, "info");
         // Only prompt to review if agent is idle and there are pending files.
         // If agent is mid-turn, silently enable — review triggers at next agent_end.
         const idle = ctx.isIdle?.() ?? true;
@@ -254,7 +254,7 @@ export default function (pi: ExtensionAPI) {
           const count = modifiedFiles.size;
           const ok = await ctx.ui.confirm(
             "Run review now?",
-            `${count} file${count > 1 ? "s" : ""} changed while senior review was off. Review them now?`,
+            `${count} file${count > 1 ? "s" : ""} changed while review was off. Review them now?`,
             { timeout: 30000 },
           );
           if (ok) {
@@ -266,7 +266,7 @@ export default function (pi: ExtensionAPI) {
           }
         }
       } else {
-        if (ctx.hasUI) ctx.ui.notify(`Senior review: off`, "info");
+        if (ctx.hasUI) ctx.ui.notify(`Review: off`, "info");
       }
       updateStatus(ctx);
     } finally {
@@ -349,17 +349,16 @@ export default function (pi: ExtensionAPI) {
 
       if (outcome.type === "max_loops" && ctx.hasUI) {
         ctx.ui.notify(
-          `Senior review: max loops reached (${settings.maxReviewLoops}). Toggle /review to reset.`,
+          `Review: max loops reached (${settings.maxReviewLoops}). Toggle /review to reset.`,
           "warning",
         );
       }
-      if (outcome.type === "cancelled" && ctx.hasUI)
-        ctx.ui.notify("Senior review cancelled", "info");
+      if (outcome.type === "cancelled" && ctx.hasUI) ctx.ui.notify("Review cancelled", "info");
       if (outcome.type === "error") {
         const errMsg = outcome.error.message;
         log(`ERROR: Review failed: ${errMsg}`);
         log(`ERROR stack: ${outcome.error.stack ?? "(no stack)"}`);
-        if (ctx.hasUI) ctx.ui.notify(`Senior review error: ${errMsg.slice(0, 200)}`, "error");
+        if (ctx.hasUI) ctx.ui.notify(`Review error: ${errMsg.slice(0, 200)}`, "error");
       }
 
       renderOutcome(outcome, ctx, hadIssuesBefore);
@@ -367,7 +366,7 @@ export default function (pi: ExtensionAPI) {
       const errMsg = err?.message ?? String(err);
       log(`ERROR: Review failed (outer): ${errMsg}`);
       log(`ERROR stack (outer): ${err?.stack ?? "(no stack)"}`);
-      if (ctx.hasUI) ctx.ui.notify(`Senior review error: ${errMsg.slice(0, 200)}`, "error");
+      if (ctx.hasUI) ctx.ui.notify(`Review error: ${errMsg.slice(0, 200)}`, "error");
       renderOutcome({ type: "error", error: err instanceof Error ? err : new Error(errMsg) }, ctx);
     } finally {
       finishReview(ctx);
@@ -482,7 +481,7 @@ export default function (pi: ExtensionAPI) {
         const ui = safeGetUi(ctx);
         if (ui && outcome.reason !== "disabled") {
           const theme = ui.theme;
-          const label = theme.fg("accent", "senior-review");
+          const label = theme.fg("accent", "lgtm");
           const reason =
             outcome.reason === "no_file_changes" || outcome.reason === "no_real_files"
               ? "no file changes"
@@ -526,7 +525,7 @@ export default function (pi: ExtensionAPI) {
         pi.sendMessage(
           {
             customType: "code-review",
-            content: `⚠️ **Senior review failed**\n\n${errMsg}\n\nThe review could not complete. Check the logs in ~/.pi/.senior-review/review.log for details. If this is a timeout, consider increasing reviewTimeoutMs in .senior-review/settings.json.`,
+            content: `⚠️ **Review failed**\n\n${errMsg}\n\nThe review could not complete. Check the logs in ~/.pi/.lgtm/review.log for details. If this is a timeout, consider increasing reviewTimeoutMs in .lgtm/settings.json.`,
             display: true,
           },
           { triggerTurn: false, deliverAs: "followUp" },
@@ -608,7 +607,7 @@ export default function (pi: ExtensionAPI) {
       log(`Cancel requested via ${source}`);
       manualReviews?.cancel();
       orchestrator.cancel();
-      if (ctx.hasUI) ctx.ui.notify("Senior review cancelled", "info");
+      if (ctx.hasUI) ctx.ui.notify("Review cancelled", "info");
     }
   }
 
@@ -642,7 +641,7 @@ export default function (pi: ExtensionAPI) {
         reviewDisplay = null;
       }
       resetTrackingState(ctx);
-      if (ctx.hasUI) ctx.ui.notify("Senior review fully reset", "info");
+      if (ctx.hasUI) ctx.ui.notify("Review fully reset", "info");
     },
   });
 
@@ -702,11 +701,10 @@ export default function (pi: ExtensionAPI) {
     architectRules = rRules;
     settings = settingsResult.settings;
 
-    if (autoReviewRules) log("Loaded auto-review rules from .senior-review/auto-review.md");
-    if (customRules) log("Loaded custom rules from .senior-review/review-rules.md");
-    if (architectRules) log("Loaded architect rules from .senior-review/architect.md");
-    if (ignorePatterns)
-      log(`Loaded ${ignorePatterns.length} ignore pattern(s) from .senior-review/ignore`);
+    if (autoReviewRules) log("Loaded auto-review rules from .lgtm/auto-review.md");
+    if (customRules) log("Loaded custom rules from .lgtm/review-rules.md");
+    if (architectRules) log("Loaded architect rules from .lgtm/architect.md");
+    if (ignorePatterns) log(`Loaded ${ignorePatterns.length} ignore pattern(s) from .lgtm/ignore`);
     for (const err of settingsResult.errors) {
       log(err);
       if (ctx.hasUI) ctx.ui.notify(err, "warning");
