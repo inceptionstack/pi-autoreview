@@ -12,75 +12,62 @@
 // A senior dev peering at code through reading glasses.
 // Two frames for a subtle animation (alternating the eyes/glasses).
 
-function buildArtFrames(label: string): string[][] {
-  const padded =
-    label.length > 8
-      ? label.slice(0, 8)
-      : label.padStart(Math.floor((8 + label.length) / 2)).padEnd(8);
-  return [
-    [
-      `    ┌─────────┐ `,
-      `    │  ◉   ◉  │ `,
-      `    │ ═══════ │ `,
-      `    │    ▽    │ `,
-      `    │  ╰───╯  │ `,
-      `    └────┬────┘ `,
-      `    ╭────┴────╮ `,
-      `   ╱│${padded} │╲`,
-      `  ╱ │ REVIEW  │ ╲`,
-      `    ╰─────────╯ `,
-    ],
-    [
-      `    ┌─────────┐ `,
-      `    │  ◎   ◎  │ `,
-      `    │ ═══════ │ `,
-      `    │    ▽    │ `,
-      `    │  ╰───╯  │ `,
-      `    └────┬────┘ `,
-      `    ╭────┴────╮ `,
-      `   ╱│${padded} │╲`,
-      `  ╱ │ REVIEW  │ ╲`,
-      `    ╰─────────╯ `,
-    ],
-  ];
-}
+// Senior: round eyes, friendly smile. Frame 2 raises an eyebrow + enlarges one eye.
+const SENIOR_FRAMES: string[][] = [
+  [
+    `    ┌─────────┐ `,
+    `    │  ─   ─  │ `,
+    `    │  ◉   ◉  │ `,
+    `    │    ▽    │ `,
+    `    │  ╰───╯  │ `,
+    `    └────┬────┘ `,
+    `    ╭────┴────╮ `,
+    `   ╱│ SENIOR  │╲`,
+    `  ╱ │ REVIEW  │ ╲`,
+    `    ╰─────────╯ `,
+  ],
+  [
+    `    ┌─────────┐ `,
+    `    │  ─   ╱  │ `,
+    `    │  ◉   ⊙  │ `,
+    `    │    ▽    │ `,
+    `    │  ╰───╯  │ `,
+    `    └────┬────┘ `,
+    `    ╭────┴────╮ `,
+    `   ╱│ SENIOR  │╲`,
+    `  ╱ │ REVIEW  │ ╲`,
+    `    ╰─────────╯ `,
+  ],
+];
 
-const SENIOR_FRAMES = buildArtFrames("SENIOR");
-
-/**
- * Architect art frames — double-line borders, square eyes, visor.
- * Visually distinct from the senior reviewer's round glasses.
- */
-function buildArchitectFrames(): string[][] {
-  return [
-    [
-      `    ╔═════════╗ `,
-      `    ║  ■   ■  ║ `,
-      `    ║ ┌─────┐ ║ `,
-      `    ║ │  △  │ ║ `,
-      `    ║ └─────┘ ║ `,
-      `    ╚════╤════╝ `,
-      `    ╭────┴────╮ `,
-      `   ╱│ARCHITCT │╲`,
-      `  ╱ │ REVIEW  │ ╲`,
-      `    ╰─────────╯ `,
-    ],
-    [
-      `    ╔═════════╗ `,
-      `    ║  □   □  ║ `,
-      `    ║ ┌─────┐ ║ `,
-      `    ║ │  △  │ ║ `,
-      `    ║ └─────┘ ║ `,
-      `    ╚════╤════╝ `,
-      `    ╭────┴────╮ `,
-      `   ╱│ARCHITCT │╲`,
-      `  ╱ │ REVIEW  │ ╲`,
-      `    ╰─────────╯ `,
-    ],
-  ];
-}
-
-const ARCHITECT_FRAMES = buildArchitectFrames();
+// Architect: double-line borders, square eyes, stern mouth.
+// Frame 2 furrows an eyebrow + squints one eye.
+const ARCHITECT_FRAMES: string[][] = [
+  [
+    `    ╔═════════╗ `,
+    `    ║  ─   ─  ║ `,
+    `    ║  ■   ■  ║ `,
+    `    ║    △    ║ `,
+    `    ║  ┗━━━┛  ║ `,
+    `    ╚════╤════╝ `,
+    `    ╭────┴────╮ `,
+    `   ╱│ARCHITCT │╲`,
+    `  ╱ │ REVIEW  │ ╲`,
+    `    ╰─────────╯ `,
+  ],
+  [
+    `    ╔═════════╗ `,
+    `    ║  ╲   ─  ║ `,
+    `    ║  ▪   ■  ║ `,
+    `    ║    △    ║ `,
+    `    ║  ┗━━━┛  ║ `,
+    `    ╚════╤════╝ `,
+    `    ╭────┴────╮ `,
+    `   ╱│ARCHITCT │╲`,
+    `  ╱ │ REVIEW  │ ╲`,
+    `    ╰─────────╯ `,
+  ],
+];
 
 const SPINNER_FRAMES = ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"];
 
