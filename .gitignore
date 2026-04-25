@@ -22,6 +22,9 @@ Thumbs.db
 # Logs
 *.log
 
+# Working documents
+headless-test-plan.md
+
 # Coverage
 coverage/
 .codex
