@@ -165,6 +165,8 @@ export default function (pi: ExtensionAPI) {
   }
 
   function updateStatus(ctx: { ui: any; hasUI?: boolean }) {
+    // Don't overwrite a temporary skip status message
+    if (skipStatusTimer) return;
     const ui = safeGetUi(ctx);
     if (!ui) return;
     const theme = ui.theme;
@@ -214,6 +216,7 @@ export default function (pi: ExtensionAPI) {
 
   let isToggling = false;
   let fileCapWarned = false;
+  let skipStatusTimer: ReturnType<typeof setTimeout> | undefined;
 
   async function toggleReview(ctx: {
     ui: any;
@@ -427,7 +430,8 @@ export default function (pi: ExtensionAPI) {
           const reason =
             outcome.reason === "no_file_changes" || outcome.reason === "no_real_files"
               ? "no file changes"
-              : outcome.reason === "no_meaningful_changes"
+              : outcome.reason === "no_meaningful_changes" ||
+                  outcome.reason === "fallback_too_small"
                 ? "no files to review"
                 : outcome.reason === "formatting_only"
                   ? "formatting only"
@@ -436,8 +440,13 @@ export default function (pi: ExtensionAPI) {
                     : null;
           if (reason) {
             ui.setStatus("code-review", `${label} ${theme.fg("dim", `skipped — ${reason}`)}`);
-            // Restore normal status after 3s
-            setTimeout(() => updateStatus(ctx), 3000);
+            // Prevent finishReview's updateStatus from overwriting immediately.
+            // After 3s, clear the flag and restore normal status.
+            if (skipStatusTimer) clearTimeout(skipStatusTimer);
+            skipStatusTimer = setTimeout(() => {
+              skipStatusTimer = undefined;
+              updateStatus(ctx);
+            }, 3000);
           }
         }
         return;
