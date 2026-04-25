@@ -58,11 +58,15 @@ export const DEFAULT_AUTO_REVIEW_RULES = `## What to review (in priority order)
 - Writes that could lose data
 - Missing transactions where atomicity matters
 
+### Architecture / Single Responsibility
+- Functions or event handlers doing multiple unrelated things — recommend extraction
+- Inline logic that should be a separate module/class for testability
+- God functions (>50 lines mixing concerns) — suggest splitting
+
 ## What NOT to report
 - Style / naming preferences
 - Missing tests (unless the change is complex algorithmic logic)
-- Refactors unrelated to the current change
-- "Could be cleaner" opinions`;
+- "Could be cleaner" opinions without a concrete SRP or DRY violation`;
 
 // ── Part 3: Suffix (always included, not user-editable) ──
 
