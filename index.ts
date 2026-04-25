@@ -469,12 +469,13 @@ export default function (pi: ExtensionAPI) {
       }
       case "completed": {
         const hasArchitect = Boolean(outcome.architect);
-        // LGTM: don't trigger a turn (nothing to fix). ISSUES_FOUND: trigger so agent fixes.
-        const seniorTrigger = !outcome.senior.result.isLgtm && !hasArchitect;
+        // Always trigger a turn for ISSUES_FOUND so agent can fix.
+        // Also trigger for LGTM so agent can continue (push, etc.).
+        // Skip triggering only when architect follows (it sends its own message).
         sendReviewResult(pi, outcome.senior.result, outcome.senior.label ?? "", {
           showLoopCount: outcome.senior.loopInfo,
           reviewedFiles: outcome.files,
-          triggerTurn: seniorTrigger,
+          triggerTurn: !hasArchitect,
         });
 
         if (!outcome.architect) return;
@@ -487,7 +488,7 @@ export default function (pi: ExtensionAPI) {
               content: `🏗️ **Architect Review**\n\nFinal architecture review found no issues. Everything fits together.\n\nIf you were waiting to push until after reviews were done — all reviews are done, no issues found. Safe to push.`,
               display: true,
             },
-            { triggerTurn: false, deliverAs: "followUp" },
+            { triggerTurn: true, deliverAs: "followUp" },
           );
         } else {
           pi.sendMessage(
