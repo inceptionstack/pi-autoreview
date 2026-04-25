@@ -117,6 +117,29 @@ const NON_MODIFYING_COMMAND_ROOTS = new Set([
   "uptime",
   "env",
   "printenv",
+  // Read-only / inspection commands
+  "cat",
+  "head",
+  "tail",
+  "less",
+  "more",
+  "wc",
+  "file",
+  "stat",
+  "readlink",
+  "realpath",
+  "basename",
+  "dirname",
+  "diff",
+  "md5sum",
+  "sha256sum",
+  "xxd",
+  "hexdump",
+  "strings",
+  "tree",
+  "jq",
+  "yq",
+  "codex", // codex CLI — analysis/review tool
 ]);
 
 /** Single-part commands that are allowed in a chain without making it file-modifying. */

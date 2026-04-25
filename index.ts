@@ -278,6 +278,7 @@ export default function (pi: ExtensionAPI) {
       log("agentToolCalls:", agentToolCalls.length);
 
       let reviewCallbacks: ReturnType<typeof startReviewWidget> | null = null;
+      const hadIssuesBefore = orchestrator.lastHadIssues;
       const outcome = await orchestrator.handleAgentEnd({
         agentToolCalls,
         modifiedFiles,
@@ -347,7 +348,7 @@ export default function (pi: ExtensionAPI) {
         if (ctx.hasUI) ctx.ui.notify(`Senior review error: ${errMsg.slice(0, 200)}`, "error");
       }
 
-      renderOutcome(outcome, ctx);
+      renderOutcome(outcome, ctx, hadIssuesBefore);
     } catch (err: any) {
       const errMsg = err?.message ?? String(err);
       log(`ERROR: Review failed (outer): ${errMsg}`);
@@ -448,7 +449,11 @@ export default function (pi: ExtensionAPI) {
 
   // ── Auto-review on agent_end ───────────────────────
 
-  function renderOutcome(outcome: ReviewOutcome, ctx: { ui: any; hasUI?: boolean }) {
+  function renderOutcome(
+    outcome: ReviewOutcome,
+    ctx: { ui: any; hasUI?: boolean },
+    hadIssuesBefore = false,
+  ) {
     switch (outcome.type) {
       case "skipped": {
         // Show a brief status hint for skip reasons that indicate "nothing to review"
@@ -471,6 +476,22 @@ export default function (pi: ExtensionAPI) {
             skipStatusShowing = true;
             ui.setStatus("code-review", `${label} ${theme.fg("dim", `skipped — ${reason}`)}`);
           }
+        }
+
+        // If the previous review had issues and this skip means they're resolved,
+        // trigger a turn so the agent can continue working.
+        if (
+          hadIssuesBefore &&
+          (outcome.reason === "no_meaningful_changes" || outcome.reason === "fallback_too_small")
+        ) {
+          pi.sendMessage(
+            {
+              customType: "code-review",
+              content: `✅ **Review issues resolved** — previous issues are no longer present. You can continue working.`,
+              display: true,
+            },
+            { triggerTurn: true, deliverAs: "followUp" },
+          );
         }
         return;
       }
