@@ -166,6 +166,14 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
+  /** Check if there are pending file modifications awaiting review. */
+  function hasPendingFiles(): boolean {
+    if (!orchestrator.isEnabled) return false;
+    const realFiles = new Set(modifiedFiles);
+    realFiles.delete("(bash file op)");
+    return realFiles.size > 0;
+  }
+
   function updateStatus(ctx: { ui: any; hasUI?: boolean }) {
     // Don't overwrite a skip status message unless there's real activity
     if (skipStatusShowing) return;
@@ -175,13 +183,19 @@ export default function (pi: ExtensionAPI) {
     const label = theme.fg("accent", "senior-review");
     const state = orchestrator.isEnabled ? theme.fg("success", "on") : theme.fg("dim", "off");
 
+    // Determine if push is currently blocked
+    const pushBlocked =
+      orchestrator.isEnabled &&
+      (orchestrator.isReviewing || orchestrator.lastHadIssues || hasPendingFiles());
+    const pushTag = pushBlocked ? ` ${theme.fg("error", "🔒 push blocked")}` : "";
+
     if (manualReviews?.isReviewing || orchestrator.isReviewing) {
       const cancelHint = shortcutConfig.cancelShortcut
         ? `${shortcutConfig.cancelShortcut} or /cancel-review`
         : "/cancel-review";
       ui.setStatus(
         "code-review",
-        `${label} ${theme.fg("warning", "reviewing…")} ${theme.fg("dim", `(${cancelHint})`)}`,
+        `${label} ${theme.fg("warning", "reviewing…")}${pushTag} ${theme.fg("dim", `(${cancelHint})`)}`,
       );
       return;
     }
@@ -201,7 +215,7 @@ export default function (pi: ExtensionAPI) {
           : "";
         ui.setStatus(
           "code-review",
-          `${label} ${state}${issueIndicator} · ${verb} ${theme.fg("accent", String(count))} ${theme.fg("muted", count === 1 ? "file" : "files")} ${theme.fg("dim", "(Alt+R toggle)")}`,
+          `${label} ${state}${issueIndicator}${pushTag} · ${verb} ${theme.fg("accent", String(count))} ${theme.fg("muted", count === 1 ? "file" : "files")} ${theme.fg("dim", "(Alt+R toggle)")}`,
         );
         return;
       }
@@ -212,7 +226,7 @@ export default function (pi: ExtensionAPI) {
       : "";
     ui.setStatus(
       "code-review",
-      `${label} ${state}${issueIndicator} ${theme.fg("dim", "(Alt+R toggle)")}`,
+      `${label} ${state}${issueIndicator}${pushTag} ${theme.fg("dim", "(Alt+R toggle)")}`,
     );
   }
 
@@ -412,7 +426,7 @@ export default function (pi: ExtensionAPI) {
     });
   });
 
-  // ── Push guard: block git push when review has unresolved issues ──
+  // ── Push guard: block git push when review is needed ──
 
   pi.on("tool_call", async (event, _ctx) => {
     if (!isToolCallEventType("bash", event)) return;
@@ -432,6 +446,14 @@ export default function (pi: ExtensionAPI) {
         block: true,
         reason:
           "Push blocked: the last code review found issues that haven't been resolved yet. Fix the issues and get LGTM before pushing.",
+      };
+    }
+
+    if (hasPendingFiles()) {
+      return {
+        block: true,
+        reason:
+          "Push blocked: files have been modified but not yet reviewed. Wait for the review to complete before pushing.",
       };
     }
   });

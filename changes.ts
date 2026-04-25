@@ -139,7 +139,6 @@ const NON_MODIFYING_COMMAND_ROOTS = new Set([
   "tree",
   "jq",
   "yq",
-  "codex", // codex CLI — analysis/review tool
 ]);
 
 /** Single-part commands that are allowed in a chain without making it file-modifying. */
