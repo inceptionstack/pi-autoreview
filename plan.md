@@ -2,6 +2,181 @@
 
 ## Date: 2026-04-23
 
+---
+
+# Design Brainstorm — Review Pipeline v2 (2026-04-25)
+
+New design topics captured during a working session; **none implemented yet**, all need design + sign-off before code. Keep this section as living notes — add trade-offs, don't commit to a solution until discussed.
+
+## D1. Eyebrow animation starts neutral, only changes on file switch
+
+**Problem:** The senior/architect robot has a two-frame eye animation (neutral ↔ furrowed/inquisitive). Currently the frames tick on a fixed interval regardless of review activity, and the review starts in the neutral frame. With a single-file review (which is most auto-reviews), the eyebrow barely moves — the robot looks bored instead of inquisitive.
+
+**Intent:** Make the robot look **actively thinking** from the first frame. Furrowed should be the default state while reviewing.
+
+**Brainstorm directions (pick later):**
+
+1. **Start furrowed, keep ticking on timer** — minimal change. Just flip `animFrame = 1` in initial state. Low cost; still looks OK when idle-ish.
+2. **Tie animation to activity, not to timer** — frame advances on each `onToolCall` event. When reviewer is actively reading/grepping, the eyebrow pulses. When idle (waiting for LLM response), the frame holds on furrowed. More honest but slightly more code.
+3. **Separate frames for "reading" vs "thinking" vs "done"** — more art, more states. Probably overkill for v2; revisit if we add more personalities.
+4. **Switch to a richer expression set tied to review outcome at the END** — after LGTM show a smile, after issues show a worried brow. Distinct concern from the "start furrowed" request; log separately.
+
+**Tests to add:** snapshot test in `test/review-display.test.ts` asserting the initial frame is the furrowed one.
+
+**Status:** [ ] designing
+
+## D2. Widget truncation when >5 reviewed files
+
+**Problem:** `buildReviewWidget` renders every file in `state.files` as a list row. When >5 files are being reviewed, the widget grows past the visible terminal area below the editor and the bottom rows are effectively invisible (or push the editor off-screen). Architect review is the worst case — it routinely reviews 10+ files across a session.
+
+**Brainstorm directions (not picked yet):**
+
+1. **Hard cap + "... N more"** — show first 5 files, then `... 7 more files` summary. Simple, always fits. Loses per-file progress for tail files.
+2. **Scrolling window centered on active file** — always show the currently-reading file + 2 before + 2 after. Fits in 5 rows. Requires keeping the active-file index reliable (see D3).
+3. **Group by module/directory** — if >5 files, group by top-level dir and show module-level counts. `src/ [▸ 3/5 read]`, `test/ [1/2 read]`. Looks clean for monorepos but needs good grouping heuristics.
+4. **Two-line compact format** — drop per-file rows entirely when >5. Show a single line: `reviewing 11 files • 7 read • currently: src/index.ts`. Sacrifices detail for always-fits.
+5. **Collapse finished files** — once a file's tool-call count exceeds a threshold (say, 3 reads), collapse it to a single line `• N files read (click to expand)`. Not really interactive in a TUI widget though.
+6. **Scroll indicator** — just show the first 5 and print `↓ 5 more below` at the bottom. Simplest scroll UI, no actual scroll needed since the widget redraws each tick.
+
+**Tension:** we want at-a-glance visibility of *which file is active* and *overall progress*. Option 2 (scrolling window) preserves both; option 4 (compact line) is the most disciplined if we trust the active-file indicator.
+
+**Tests:** property-style fixture test in `test/review-display.test.ts` — for file counts from 0 to 30, assert widget height ≤ some budget (e.g. 12 lines).
+
+**Status:** [ ] brainstorming — need to pick an option
+
+## D3. Active-file highlight not actually working in practice
+
+**Problem:** Observation during recent reviews: the `▸ ... ← reading` indicator frequently doesn't match the file the reviewer is actually working on. Previously tightened `findMatchingFile` (path-segment boundaries) and skipped `bash` tool calls, but the indicator still seems to lag or mis-track.
+
+**Suspected root causes (need investigation):**
+
+1. **Reviewer reads files outside the listed set for cross-reference.** When it does, no file matches, `activeFile` is left stale from the last matched read. Net effect: the highlight sticks to an old file while the reviewer is clearly reading something else.
+2. **Path absolute/relative mismatch.** If `files` contains relative paths (`src/a.ts`) but the reviewer reads absolute paths, the boundary match should work — but what if git gave back paths with a `./` prefix or a symlinked root?
+3. **Multi-root reviews.** When `gitRoots` has >1 entry, `files` contains `root/path` tuples but the reviewer's `read(...)` tool gets just `path`. Boundary match may drop these.
+4. **Widget tick race.** The widget redraws on a 150ms timer; `onToolCall` fires on the reviewer's loop. A fast sequence of reads might only update state for the last one before the next redraw.
+
+**Diagnostic approach:**
+
+- Add a debug mode that logs every `(tool_name, target_path, matched_file)` triple to `~/.pi/.lgtm/review.log`.
+- Cross-reference against the reviewer's actual output: did the file indicator ever match the file it was critiquing?
+- If causes 1 or 3 dominate, make `activeFile` fall back to a "currently unlisted read" state (e.g. show `▸ (cross-ref) node_modules/x/y.ts`) instead of holding stale.
+
+**Status:** [ ] investigating — capture logs first, then decide fix
+
+## D4. Refactor: reviewers as pluggable "agent personalities" in a pipeline
+
+**Vision:** Today's hard-coded pair (senior review then optional architect review) should become a generic review *pipeline* where each step is an "agent personality" with its own:
+
+- **System prompt** (the role / charter)
+- **Review rules** (appended to prompt; e.g. `review-rules.md`, `architect.md`, `security.md`, ...)
+- **Context strategy** (per-file diffs, full repo tree, commit history, branch diff, ...)
+- **Verdict parser** (currently LGTM/ISSUES_FOUND; future: rating, tag list, json summary)
+- **Trigger condition** (when to run: every turn, multi-file only, on commit, on PR, ...)
+- **Output handling** (sendMessage + triggerTurn | inline status | commit message amendment)
+
+**Why:** user wants to add e.g. a security review, commit-message review, test-coverage review, architectural-debt review — each with its own prompt and rules. Hard-coding more functions/modules per reviewer is the wrong shape.
+
+**Design sketch (to iterate on):**
+
+```ts
+// One personality = one reviewer role
+export interface ReviewPersonality {
+  id: string;                             // "senior" | "architect" | "security" | ...
+  displayName: string;                    // "Senior Review" (shown to user)
+  systemPrompt: string;                   // the role/charter
+  customRulesFile?: string;               // .lgtm/<id>.md (optional)
+  contextStrategy: ContextStrategy;       // per-file diff | full repo | last commit | ...
+  verdictParser: (raw: string) => Verdict;
+  outputHandler: (result, api) => void;   // how to deliver to user/agent
+}
+
+// One pipeline step = one personality invocation, with DAG metadata
+export interface PipelineStep {
+  personality: ReviewPersonality;
+  trigger: TriggerCondition;              // e.g. always | multi-file | on-commit
+  dependsOn: string[];                    // ids of steps that must pass before this runs
+  runMode: "serial" | "parallel";
+}
+
+// Orchestrator consumes a DAG and resolves it
+export interface ReviewPipeline {
+  steps: PipelineStep[];
+}
+```
+
+**Invariants to preserve:**
+
+- Fail-closed on missing API key or timeout (current architect-failure surfacing).
+- Existing senior → architect sequence must express as a 2-step DAG with no behavior change.
+- `settings.json` gets a `pipeline` key to declare which steps are enabled + their trigger + runMode. Default pipeline matches today's behavior exactly.
+
+**Key open questions:**
+
+- **Parallel runs**: can multiple reviewers safely share a single SDK auth context? Probably yes (each spawns its own `createAgentSession`). But rate limits matter — if we parallel-fire 4 reviewers they all hit Bedrock at once.
+- **Result aggregation for parallel**: if security + senior both fire, and security LGTMs but senior finds issues, what's the combined message to the user? Probably per-step sections in a single summary message.
+- **Cross-step context**: should a later step see earlier steps' findings? E.g. architect sees senior's output. Current code does this implicitly; needs an explicit contract.
+- **Config file shape**: a single `settings.json` with nested pipeline config? Or per-step `.lgtm/<id>.json`? Probably the latter for cleanliness.
+- **Backward compat**: users with existing `.lgtm/review-rules.md` + `.lgtm/architect.md` must see zero behavior change.
+
+**Status:** [ ] design only. Needs an architecture RFC before code.
+
+## D5. External agent CLI as review backend (codex / claude / kiro / shell)
+
+**Vision:** Today the reviewer is hard-wired to use pi's SDK (`createAgentSession` + Bedrock). The user wants to be able to delegate a review step to an **external CLI** instead — codex, claude-cli, kiro, or a generic shell command — so power users can swap in their tool of choice per step.
+
+**Why this is structurally interesting:** it's a clean separation between "who runs the review" (backend) and "what the review is" (personality). A user might pair the senior personality with the pi SDK and the architect personality with codex CLI, because codex is better at cross-file reasoning.
+
+**Design sketch:**
+
+```ts
+export interface ReviewBackend {
+  id: string;                            // "pi-sdk" | "codex-cli" | "claude-cli" | "shell"
+  invoke(prompt: string, opts: InvokeOpts): Promise<BackendResult>;
+  capabilities: {
+    hasReadTool: boolean;
+    hasBashTool: boolean;
+    hasFileSearch: boolean;
+    supportsStreaming: boolean;
+  };
+}
+
+export interface InvokeOpts {
+  cwd: string;
+  timeoutMs: number;
+  onActivity?: (msg: string) => void;
+  onToolCall?: (tool: string, target: string | null) => void;
+  signal: AbortSignal;
+}
+```
+
+**Concrete backends to support:**
+
+1. **pi-sdk** (current behavior) — `createAgentSession` with Bedrock. Default.
+2. **codex-cli** — `codex exec --sandbox read-only --cd <cwd> "<prompt>"`. Stream stdout, parse verdict. Already used in our brainstorm loops; proves it works.
+3. **claude-cli** — `claude --print "<prompt>"` or via MCP.
+4. **kiro** — similar CLI invocation; check their API surface.
+5. **generic shell** — `${cmd} <prompt-file>`; the user writes their own wrapper.
+
+**Trade-offs / open questions:**
+
+- **Activity streaming**: pi SDK emits structured tool-call events so the widget can update in real-time. External CLIs emit free-form stdout. We'd need heuristics (grep for `read <path>`) or settle for a simpler widget when backends don't support structured events.
+- **Tool capabilities vary**: codex has its own read-only sandbox; claude-cli via MCP has different tool shape; a shell backend has none. Personalities should declare what capabilities they need, and backends should be rejected if missing (e.g. security-review needs bash + read, so can't pair with a shell backend that only has text-in/text-out).
+- **Auth**: each external backend has its own auth (codex uses OpenAI, claude-cli uses Anthropic, etc.). We don't manage it; we just invoke the binary and trust it's set up. Add a health-check on extension init: `which codex` etc.
+- **Error surfaces**: external CLIs can fail in more ways (binary missing, auth broken, sandbox rejected, etc.). Fail-open logic stays the same but the error messages need to be clear about *which backend* failed.
+- **Security**: invoking an external CLI with a large prompt that contains user code — make sure we don't accidentally exfil. Should be fine since the user opted in, but worth a paragraph in README.
+
+**Integration with D4:**
+
+D4's `ReviewPersonality` gets a new field:
+```ts
+backend: string;   // "pi-sdk" | "codex-cli" | "claude-cli" | "shell:my-custom"
+```
+
+Default to pi-sdk for all existing personalities; users override per step in their settings.
+
+**Status:** [ ] design only. Needs backend contract RFC first, then pilot with codex-cli as the second backend (since we already use it in the dev loop — fastest path to validate the abstraction).
+
+
 ## Open Issues
 
 ### Changelog check in default review rules
