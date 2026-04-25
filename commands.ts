@@ -6,7 +6,7 @@ import { clampCommitCount, shouldDiffAllCommits, truncateDiff } from "./helpers"
 import { runReviewSession } from "./reviewer";
 import { sendReviewResult } from "./message-sender";
 import { isBinaryPath } from "./changes";
-import { LARGE_LIMITS, buildPerFileContext } from "./context";
+import { LARGE_LIMITS, buildPerFileContext, listDiffFiles } from "./context";
 import { filterIgnored } from "./ignore";
 import { log } from "./logger";
 import {
@@ -146,20 +146,17 @@ export function registerReviewCommands(opts: RegisterCommandsOptions): ManualRev
         const { effectiveCount, wasClamped } = clampCommitCount(count, totalCommits);
         if (wasClamped) ctx.ui.notify(`Repo has ${totalCommits} commits. Reviewing all.`, "info");
 
-        const diffArgs: string[] = [];
+        const diffRange: string[] = [];
         if (shouldDiffAllCommits(effectiveCount, totalCommits)) {
           const emptyTree = (
             await gitExec(ctx.cwd, ["hash-object", "-t", "tree", "/dev/null"])
           ).stdout.trim();
-          diffArgs.push("diff", emptyTree, "HEAD");
+          diffRange.push(emptyTree, "HEAD");
         } else {
-          diffArgs.push("diff", `HEAD~${effectiveCount}`, "HEAD");
+          diffRange.push(`HEAD~${effectiveCount}`, "HEAD");
         }
 
-        const nameArgs = [...diffArgs, "--diff-filter=d", "--name-only"];
-        const nameResult = await gitExec(ctx.cwd, nameArgs);
-        let changedFiles =
-          nameResult.code === 0 ? nameResult.stdout.trim().split("\n").filter(Boolean) : [];
+        let changedFiles = await listDiffFiles(opts.pi, ctx.cwd, ...diffRange);
 
         const ignorePatterns = opts.getIgnorePatterns();
         if (ignorePatterns && ignorePatterns.length > 0) {
@@ -179,7 +176,7 @@ export function registerReviewCommands(opts: RegisterCommandsOptions): ManualRev
           return;
         }
 
-        const scopedDiffArgs = [...diffArgs, "--", ...changedFiles];
+        const scopedDiffArgs = ["diff", ...diffRange, "--", ...changedFiles];
         const diffResult = await gitExec(ctx.cwd, scopedDiffArgs, 15000);
         if (diffResult.code !== 0) {
           ctx.ui.notify(`git diff failed: ${diffResult.stderr.slice(0, 200)}`, "error");
@@ -255,14 +252,7 @@ export function registerReviewCommands(opts: RegisterCommandsOptions): ManualRev
           const pendingDiff = await gitExec(gitRoot, ["diff", "HEAD"], 15000);
           const hasPendingDiff = pendingDiff.code === 0 && pendingDiff.stdout.trim();
 
-          const pendingNames = await gitExec(gitRoot, [
-            "diff",
-            "--diff-filter=d",
-            "HEAD",
-            "--name-only",
-          ]);
-          const pendingFiles =
-            pendingNames.code === 0 ? pendingNames.stdout.trim().split("\n").filter(Boolean) : [];
+          const pendingFiles = await listDiffFiles(opts.pi, gitRoot, "HEAD");
 
           const untrackedResult = await gitExec(gitRoot, [
             "ls-files",
@@ -318,14 +308,8 @@ export function registerReviewCommands(opts: RegisterCommandsOptions): ManualRev
               diffArgs = ["HEAD~1", "HEAD"];
             }
 
-            const lastNames = await gitExec(gitRoot, [
-              "diff",
-              "--diff-filter=d",
-              ...diffArgs,
-              "--name-only",
-            ]);
-            reviewFiles =
-              lastNames.code === 0 ? lastNames.stdout.trim().split("\n").filter(Boolean) : [];
+            const lastNames = await listDiffFiles(opts.pi, gitRoot, ...diffArgs);
+            reviewFiles = lastNames;
 
             const ignorePatterns = opts.getIgnorePatterns();
             if (ignorePatterns && ignorePatterns.length > 0) {

@@ -63,11 +63,7 @@ export async function buildReviewContext(
   let diff = fullDiffResult.code === 0 ? fullDiffResult.stdout.trim() : "";
 
   onStatus?.("listing changed files…");
-  const changedResult = await pi.exec("git", ["diff", "--diff-filter=d", "HEAD", "--name-only"], {
-    timeout: 5000,
-  });
-  let changedFiles =
-    changedResult.code === 0 ? changedResult.stdout.trim().split("\n").filter(Boolean) : [];
+  let changedFiles = await listDiffFiles(pi, ".", "HEAD");
 
   // Include untracked (new) files
   const untrackedResult = await pi.exec("git", ["ls-files", "--others", "--exclude-standard"], {
@@ -312,8 +308,8 @@ async function buildRepoContext(
   return { text, files: filteredFiles };
 }
 
-/** List files changed in a git diff range. */
-async function listDiffFiles(
+/** List files changed in a git diff range, excluding deleted files. */
+export async function listDiffFiles(
   pi: ExtensionAPI,
   root: string,
   ...range: string[]
@@ -448,14 +444,7 @@ export async function getContentFromLastCommit(
     const commitLog = (
       await pi.exec("git", ["log", "--oneline", "-10"], { timeout: 5000 })
     ).stdout.trim();
-    const nameResult = await pi.exec(
-      "git",
-      ["diff", "--diff-filter=d", "HEAD~1", "HEAD", "--name-only"],
-      {
-        timeout: 5000,
-      },
-    );
-    let files = nameResult.code === 0 ? nameResult.stdout.trim().split("\n").filter(Boolean) : [];
+    let files = await listDiffFiles(pi, ".", "HEAD~1", "HEAD");
 
     // Apply ignore patterns so the last-commit fallback respects .senior-review/ignore
     if (ignorePatterns && ignorePatterns.length > 0) {
