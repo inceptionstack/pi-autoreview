@@ -53,6 +53,15 @@ export function registerReviewCommands(opts: RegisterCommandsOptions): ManualRev
   let reviewAbort: AbortController | null = null;
   let isReviewing = false;
 
+  /**
+   * Run a git command in a specific directory.
+   * Always uses -C to ensure commands run in the right repo,
+   * not the process cwd (which may be ~ while the user switched to a repo).
+   */
+  function gitExec(cwd: string, args: string[], timeout = 5000) {
+    return opts.pi.exec("git", ["-C", cwd, ...args], { timeout });
+  }
+
   function buildReviewOptions(
     signal: AbortSignal,
     cwd: string,
@@ -120,9 +129,7 @@ export function registerReviewCommands(opts: RegisterCommandsOptions): ManualRev
       beginManualReview(ctx);
 
       try {
-        const countResult = await opts.pi.exec("git", ["rev-list", "--count", "HEAD"], {
-          timeout: 5000,
-        });
+        const countResult = await gitExec(ctx.cwd, ["rev-list", "--count", "HEAD"]);
         if (countResult.code !== 0) log(`git rev-list failed: ${countResult.stderr.trim()}`);
 
         const totalCommits = parseInt(countResult.stdout.trim(), 10) || 0;
@@ -137,9 +144,7 @@ export function registerReviewCommands(opts: RegisterCommandsOptions): ManualRev
         const diffArgs: string[] = [];
         if (shouldDiffAllCommits(effectiveCount, totalCommits)) {
           const emptyTree = (
-            await opts.pi.exec("git", ["hash-object", "-t", "tree", "/dev/null"], {
-              timeout: 5000,
-            })
+            await gitExec(ctx.cwd, ["hash-object", "-t", "tree", "/dev/null"])
           ).stdout.trim();
           diffArgs.push("diff", emptyTree, "HEAD");
         } else {
@@ -147,7 +152,7 @@ export function registerReviewCommands(opts: RegisterCommandsOptions): ManualRev
         }
 
         const nameArgs = [...diffArgs, "--name-only"];
-        const nameResult = await opts.pi.exec("git", nameArgs, { timeout: 5000 });
+        const nameResult = await gitExec(ctx.cwd, nameArgs);
         let changedFiles =
           nameResult.code === 0 ? nameResult.stdout.trim().split("\n").filter(Boolean) : [];
 
@@ -170,7 +175,7 @@ export function registerReviewCommands(opts: RegisterCommandsOptions): ManualRev
         }
 
         const scopedDiffArgs = [...diffArgs, "--", ...changedFiles];
-        const diffResult = await opts.pi.exec("git", scopedDiffArgs, { timeout: 15000 });
+        const diffResult = await gitExec(ctx.cwd, scopedDiffArgs, 15000);
         if (diffResult.code !== 0) {
           ctx.ui.notify(`git diff failed: ${diffResult.stderr.slice(0, 200)}`, "error");
           return;
@@ -183,9 +188,7 @@ export function registerReviewCommands(opts: RegisterCommandsOptions): ManualRev
         }
 
         const commitLog = (
-          await opts.pi.exec("git", ["log", "--oneline", `-${effectiveCount}`], {
-            timeout: 5000,
-          })
+          await gitExec(ctx.cwd, ["log", "--oneline", `-${effectiveCount}`])
         ).stdout.trim();
         const truncatedDiff = truncateDiff(diff, LARGE_LIMITS.maxDiffSize);
         const commitLabel = `last ${effectiveCount} commit${effectiveCount > 1 ? "s" : ""}`;
@@ -224,9 +227,7 @@ export function registerReviewCommands(opts: RegisterCommandsOptions): ManualRev
       try {
         const { resolve } = await import("node:path");
 
-        const gitCheck = await opts.pi.exec("git", ["rev-parse", "--show-toplevel"], {
-          timeout: 5000,
-        });
+        const gitCheck = await gitExec(ctx.cwd, ["rev-parse", "--show-toplevel"]);
         let isGitRepo = gitCheck.code === 0;
         let gitRoot = isGitRepo ? gitCheck.stdout.trim() : null;
 
@@ -245,26 +246,18 @@ export function registerReviewCommands(opts: RegisterCommandsOptions): ManualRev
         let prompt: string;
 
         if (isGitRepo && gitRoot) {
-          // Helper: prefix git args with -C gitRoot so commands run in the right repo
-          // (cwd may be ~ while gitRoot is a detected repo from the session)
-          const gitArgs = (...args: string[]) => ["-C", gitRoot, ...args];
-
-          const pendingDiff = await opts.pi.exec("git", gitArgs("diff", "HEAD"), {
-            timeout: 15000,
-          });
+          const pendingDiff = await gitExec(gitRoot, ["diff", "HEAD"], 15000);
           const hasPendingDiff = pendingDiff.code === 0 && pendingDiff.stdout.trim();
 
-          const pendingNames = await opts.pi.exec("git", gitArgs("diff", "HEAD", "--name-only"), {
-            timeout: 5000,
-          });
+          const pendingNames = await gitExec(gitRoot, ["diff", "HEAD", "--name-only"]);
           const pendingFiles =
             pendingNames.code === 0 ? pendingNames.stdout.trim().split("\n").filter(Boolean) : [];
 
-          const untrackedResult = await opts.pi.exec(
-            "git",
-            gitArgs("ls-files", "--others", "--exclude-standard"),
-            { timeout: 5000 },
-          );
+          const untrackedResult = await gitExec(gitRoot, [
+            "ls-files",
+            "--others",
+            "--exclude-standard",
+          ]);
           if (untrackedResult.code === 0 && untrackedResult.stdout.trim()) {
             const untracked = untrackedResult.stdout.trim().split("\n").filter(Boolean);
             const existing = new Set(pendingFiles);
@@ -297,9 +290,7 @@ export function registerReviewCommands(opts: RegisterCommandsOptions): ManualRev
             ctx.ui.notify(`Reviewing ${reviewFiles.length} pending file(s)…`, "info");
             prompt = `${buildReviewPrompt(opts.getAutoReviewRules(), opts.getCustomRules(), opts.getLastUserMessage())}\n\n---\n\nReview all pending changes in the repo.\n\n## Files to review\n\nRead each file with read(path) to see its full contents.\n\n${fileSections.join("\n\n---\n\n")}`;
           } else {
-            const countResult = await opts.pi.exec("git", gitArgs("rev-list", "--count", "HEAD"), {
-              timeout: 5000,
-            });
+            const countResult = await gitExec(gitRoot, ["rev-list", "--count", "HEAD"]);
             const totalCommits = parseInt(countResult.stdout.trim(), 10) || 0;
             if (totalCommits === 0) {
               ctx.ui.notify("No pending changes and no commits to review.", "info");
@@ -309,22 +300,14 @@ export function registerReviewCommands(opts: RegisterCommandsOptions): ManualRev
             let diffArgs: string[];
             if (totalCommits === 1) {
               const emptyTree = (
-                await opts.pi.exec("git", gitArgs("hash-object", "-t", "tree", "/dev/null"), {
-                  timeout: 5000,
-                })
+                await gitExec(gitRoot, ["hash-object", "-t", "tree", "/dev/null"])
               ).stdout.trim();
               diffArgs = [emptyTree, "HEAD"];
             } else {
               diffArgs = ["HEAD~1", "HEAD"];
             }
 
-            const lastNames = await opts.pi.exec(
-              "git",
-              gitArgs("diff", ...diffArgs, "--name-only"),
-              {
-                timeout: 5000,
-              },
-            );
+            const lastNames = await gitExec(gitRoot, ["diff", ...diffArgs, "--name-only"]);
             reviewFiles =
               lastNames.code === 0 ? lastNames.stdout.trim().split("\n").filter(Boolean) : [];
 
@@ -338,9 +321,7 @@ export function registerReviewCommands(opts: RegisterCommandsOptions): ManualRev
               return;
             }
 
-            const commitLog = (
-              await opts.pi.exec("git", gitArgs("log", "--oneline", "-1"), { timeout: 5000 })
-            ).stdout.trim();
+            const commitLog = (await gitExec(gitRoot, ["log", "--oneline", "-1"])).stdout.trim();
 
             const fileSections = await buildPerFileContext(
               opts.pi,
