@@ -62,7 +62,7 @@ All arrows mean "imports from". No circular dependencies exist.
 
         git-roots.ts ──► (pi SDK)
 
-        changes.ts ──── (standalone, no local imports except logger.ts)
+        changes.ts ──── (standalone, no local imports)
         
         helpers.ts ──── (standalone, no local imports)
         

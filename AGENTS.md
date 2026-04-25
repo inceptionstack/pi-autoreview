@@ -8,7 +8,7 @@ A [pi](https://github.com/badlogic/pi-mono) extension that automatically reviews
 
 ```
 pi-senior-review/
-├── index.ts              ← Extension entry point & orchestration (685 lines)
+├── index.ts              ← Extension entry point & orchestration (~1300 lines)
 ├── settings.ts           ← Config loading from .senior-review/ dirs
 ├── prompt.ts             ← Review prompt construction (3-part structure)
 ├── reviewer.ts           ← Spawns pi session, runs review, parses verdict
@@ -22,7 +22,7 @@ pi-senior-review/
 ├── review-display.ts     ← TUI widget (ASCII art + file progress)
 ├── scaffold.ts           ← Template content for /scaffold-review-files
 ├── default-review-rules.md ← Default review criteria (OWASP, SOLID, DRY, etc.)
-├── test/                 ← 162+ tests across 10 files (vitest)
+├── test/                 ← 248 tests across 9 files (vitest)
 └── .senior-review/       ← Local config (settings.json, review-rules.md, etc.)
 ```
 
@@ -47,7 +47,7 @@ npm run format:check   # Prettier check
 - **Linting:** ESLint 9 + typescript-eslint
 - **Formatting:** Prettier
 - **Dependency:** `@mariozechner/pi-coding-agent` (peer dep — the pi SDK)
-- **Only runtime dep:** `yaml` npm package (for YAML parsing)
+- **No runtime dependencies** — only peer dep on the pi SDK
 
 ## Git workflow
 
@@ -125,7 +125,7 @@ Triggers automatically when >1 file was reviewed across the session AND content 
 - Tests use vitest (`describe`, `it`, `expect`)
 - Test names follow descriptive pattern: `functionName > scenario > expected behavior`
 - Pure functions are tested directly; I/O-heavy functions are tested with mocks
-- 162+ tests across 10 test files
+- 248 tests across 9 test files
 
 ## Common modification scenarios
 
