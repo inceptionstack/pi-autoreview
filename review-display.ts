@@ -46,7 +46,41 @@ function buildArtFrames(label: string): string[][] {
 }
 
 const SENIOR_FRAMES = buildArtFrames("SENIOR");
-const ARCHITECT_FRAMES = buildArtFrames("ARCHITCT");
+
+/**
+ * Architect art frames — double-line borders, square eyes, visor.
+ * Visually distinct from the senior reviewer's round glasses.
+ */
+function buildArchitectFrames(): string[][] {
+  return [
+    [
+      `    ╔═════════╗ `,
+      `    ║  ■   ■  ║ `,
+      `    ║ ┌─────┐ ║ `,
+      `    ║ │  △  │ ║ `,
+      `    ║ └─────┘ ║ `,
+      `    ╚════╤════╝ `,
+      `    ╭────┴────╮ `,
+      `   ╱│ARCHITCT │╲`,
+      `  ╱ │ REVIEW  │ ╲`,
+      `    ╰─────────╯ `,
+    ],
+    [
+      `    ╔═════════╗ `,
+      `    ║  □   □  ║ `,
+      `    ║ ┌─────┐ ║ `,
+      `    ║ │  △  │ ║ `,
+      `    ║ └─────┘ ║ `,
+      `    ╚════╤════╝ `,
+      `    ╭────┴────╮ `,
+      `   ╱│ARCHITCT │╲`,
+      `  ╱ │ REVIEW  │ ╲`,
+      `    ╰─────────╯ `,
+    ],
+  ];
+}
+
+const ARCHITECT_FRAMES = buildArchitectFrames();
 
 const SPINNER_FRAMES = ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"];
 
