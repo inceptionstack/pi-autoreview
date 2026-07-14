@@ -9,8 +9,16 @@
  */
 
 import { readFile } from "node:fs/promises";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import {
+  readFileSync,
+  writeFileSync,
+  renameSync,
+  mkdirSync,
+  existsSync,
+  statSync,
+  unlinkSync,
+} from "node:fs";
+import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 
 /**
@@ -58,6 +66,10 @@ function readConfigFileSync(cwd: string, filename: string): string | null {
 // ── Types ────────────────────────────────────────────
 
 export interface AutoReviewSettings {
+  /** Master on/off switch for auto-review. Persisted across sessions.
+   * Re-read from disk at each agent_end so external tools (e.g. roundhouse's
+   * /toggle-review) can flip it without restarting the session. */
+  enabled: boolean;
   maxReviewLoops: number;
   model: string; // "provider/model-id" e.g. "amazon-bedrock/us.meta.llama4-maverick-17b-instruct-v1:0"
   thinkingLevel: string; // "off" | "minimal" | "low" | "medium" | "high" | "xhigh"
@@ -85,6 +97,7 @@ export const DEFAULT_TOGGLE_SHORTCUT = "alt+r";
 export const DEFAULT_CANCEL_SHORTCUT = ""; // no default shortcut — use /cancel-review command
 
 export const DEFAULT_SETTINGS: AutoReviewSettings = {
+  enabled: true,
   maxReviewLoops: 100,
   model: "amazon-bedrock/us.meta.llama4-maverick-17b-instruct-v1:0",
   thinkingLevel: "off",
@@ -111,6 +124,16 @@ export function parseSettings(parsed: Record<string, unknown>): {
 } {
   const errors: string[] = [];
   const settings = { ...DEFAULT_SETTINGS };
+
+  if ("enabled" in parsed) {
+    if (typeof parsed.enabled === "boolean") {
+      settings.enabled = parsed.enabled;
+    } else {
+      errors.push(
+        `[hard-no] "enabled" must be a boolean (got ${JSON.stringify(parsed.enabled)}). Using default: ${DEFAULT_SETTINGS.enabled}.`,
+      );
+    }
+  }
 
   if ("maxReviewLoops" in parsed) {
     if (
@@ -329,4 +352,162 @@ export async function loadReviewRules(cwd: string): Promise<string | null> {
 export async function loadAutoReviewRules(cwd: string): Promise<string | null> {
   const content = await readConfigFile(cwd, "auto-review.md");
   return content?.trim() || null;
+}
+
+// ── Runtime on/off toggle ──────────────────────────────
+
+/**
+ * Fast synchronous read of just the `enabled` field from settings.json.
+ * Called on each agent_end to pick up toggles made by external tools (e.g.
+ * `roundhouse` `/toggle-review`) without restarting the session.
+ *
+ * Local (.hardno/settings.json in cwd) takes precedence over global
+ * (~/.pi/.hardno/settings.json).
+ *
+ * Semantics: local "wins on silence" too — if the local file exists but is
+ * missing/malformed/unreadable (anything except ENOENT), we do NOT fall
+ * through to global. This prevents a surprise where corrupting local silently
+ * exposes a different global value.
+ */
+export function isEnabledFromDisk(cwd: string, home?: string): boolean | null {
+  for (const dir of configDirs(cwd, home)) {
+    const path = join(dir, "settings.json");
+    let raw: string;
+    try {
+      raw = readFileSync(path, "utf8");
+    } catch (err: any) {
+      // Only fall through on ENOENT. Permission errors, IO errors, etc. should
+      // halt resolution — if the more-specific file exists but we can't read
+      // it, we shouldn't silently fall through to the less-specific file.
+      if (err?.code === "ENOENT") continue;
+      return null;
+    }
+    // File exists: parse once; any failure/shape-mismatch = return null WITHOUT
+    // falling through (local wins on silence / corruption).
+    try {
+      const parsed = JSON.parse(raw);
+      if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+        if (typeof parsed.enabled === "boolean") return parsed.enabled;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+/**
+ * Resolve which settings.json path to *write* to for persisting the `enabled`
+ * flag. Matches the read-resolution path used by loadSettings / isEnabledFromDisk:
+ *   - If local (cwd/.hardno/settings.json) exists, write there (local wins).
+ *   - Otherwise, write to global (~/.pi/.hardno/settings.json).
+ *
+ * This prevents the "toggle appears to revert" bug where writing global
+ * gets masked by a local file that the read path loads first.
+ */
+export function resolveWritePath(cwd: string, home?: string): string {
+  const [localDir, globalDir] = configDirs(cwd, home);
+  const localPath = join(localDir, "settings.json");
+  if (existsSync(localPath)) return localPath;
+  return join(globalDir, "settings.json");
+}
+
+/**
+ * Persist `enabled: boolean` to the settings file selected by resolveWritePath.
+ * Atomic tmp+rename; preserves other fields. Creates the file/dir if missing.
+ *
+ * Race handling: does a read-modify-write with a small retry window. If the
+ * file mtime changes between our read and our intended rename, we re-read,
+ * re-apply `enabled`, and retry (up to 3 attempts). Eliminates the common
+ * case where an external writer (e.g. roundhouse) flips a different field
+ * concurrently.
+ *
+ * Before overwriting a non-plain-object or malformed file (rare; usually
+ * means another tool wrote garbage), we back up the original bytes to
+ * <settings>.corrupt-<ts>.bak so user data isn't silently discarded.
+ */
+export function writeEnabledToDisk(
+  enabled: boolean,
+  opts: { cwd?: string; home?: string; targetPath?: string } = {},
+): void {
+  const home = opts.home ?? homedir();
+  // Explicit targetPath wins (useful for tests); otherwise resolve via cwd.
+  const target =
+    opts.targetPath ??
+    (opts.cwd ? resolveWritePath(opts.cwd, home) : join(home, ".pi", ".hardno", "settings.json"));
+  const dir = dirname(target);
+
+  const MAX_ATTEMPTS = 3;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    // Read existing (preserve other fields)
+    let existing: Record<string, unknown> = {};
+    let wasMalformed = false;
+    let rawBytes: string | null = null;
+    let readMtime: number | null = null;
+    try {
+      rawBytes = readFileSync(target, "utf8");
+      readMtime = statSync(target).mtimeMs;
+      const parsed = JSON.parse(rawBytes);
+      if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+        existing = parsed as Record<string, unknown>;
+      } else {
+        wasMalformed = true; // valid JSON but wrong shape (array / scalar)
+      }
+    } catch (err: any) {
+      if (err?.code !== "ENOENT") wasMalformed = true;
+      // else: file missing, start fresh
+    }
+
+    // Safety: if the existing file had bytes we can't safely merge into,
+    // back them up before overwrite so user data isn't silently lost.
+    if (wasMalformed && rawBytes !== null) {
+      try {
+        const backup = `${target}.corrupt-${Date.now()}.bak`;
+        writeFileSync(backup, rawBytes, { encoding: "utf8" });
+      } catch {
+        /* best-effort only */
+      }
+    }
+
+    existing.enabled = enabled;
+
+    // Atomic write: tmp + rename in the same directory.
+    mkdirSync(dir, { recursive: true });
+    const tmp = `${target}.tmp-${process.pid}-${Date.now()}-${attempt}`;
+    try {
+      writeFileSync(tmp, JSON.stringify(existing, null, 2) + "\n", { encoding: "utf8" });
+
+      // Race check: if the file's mtime changed after our read, someone else
+      // wrote between our read and our rename. Discard our tmp and retry so
+      // we don't clobber their edits to other fields.
+      if (readMtime !== null && attempt < MAX_ATTEMPTS) {
+        try {
+          const currentMtime = statSync(target).mtimeMs;
+          if (currentMtime !== readMtime) {
+            try {
+              unlinkSync(tmp);
+            } catch {
+              /* ignore */
+            }
+            continue;
+          }
+        } catch {
+          /* stat failed — fall through to rename */
+        }
+      }
+
+      renameSync(tmp, target);
+      return;
+    } catch (err) {
+      // Clean up orphan tmp on any failure so we don't leave garbage behind.
+      try {
+        unlinkSync(tmp);
+      } catch {
+        /* ignore */
+      }
+      throw err;
+    }
+  }
 }

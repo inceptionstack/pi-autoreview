@@ -30,6 +30,8 @@ import {
   loadReviewRules,
   loadAutoReviewRules,
   loadShortcutSettingsSync,
+  isEnabledFromDisk,
+  writeEnabledToDisk,
 } from "./settings";
 import { runReviewSession } from "./reviewer";
 import { classifyBashCommand, defaultJudgeRunner } from "./judge";
@@ -272,6 +274,15 @@ export default function (pi: ExtensionAPI) {
 
     try {
       orchestrator.setEnabled(!orchestrator.isEnabled);
+      // Persist so the toggle survives restart + is visible to external tools.
+      // Write to the same file the read path would load (local wins if present)
+      // so an in-TUI toggle isn't masked by a local settings file on next read.
+      try {
+        writeEnabledToDisk(orchestrator.isEnabled, { cwd: ctx.cwd });
+        if (settings) settings.enabled = orchestrator.isEnabled;
+      } catch (err: any) {
+        log(`warning: could not persist toggle: ${err?.message ?? err}`);
+      }
       if (orchestrator.isEnabled) {
         if (ctx.hasUI) ctx.ui.notify(`Review: on`, "info");
         // Only prompt to review if agent is idle and there are pending files.
@@ -715,6 +726,19 @@ export default function (pi: ExtensionAPI) {
       }
     }
 
+    // Runtime re-read: pick up toggles made by external tools (e.g.
+    // roundhouse's /toggle-review) since the last turn. Cheap — synchronous
+    // stat+parse of a tiny JSON file once per agent_end.
+    const diskEnabled = isEnabledFromDisk(ctx.cwd);
+    if (diskEnabled !== null && diskEnabled !== orchestrator.isEnabled) {
+      log(`runtime toggle: disk says enabled=${diskEnabled}, updating orchestrator`);
+      orchestrator.setEnabled(diskEnabled);
+      // F4: guard like the toggleReview handler for consistency. `settings`
+      // is set on session_start before agent_end can fire, but defensive
+      // code is cheap and matches the other call site.
+      if (settings) settings.enabled = diskEnabled;
+    }
+
     if (!orchestrator.isEnabled) {
       // Keep tracking state (modifiedFiles, agentToolCalls) so we can
       // offer to review when the user toggles review back on.
@@ -726,7 +750,7 @@ export default function (pi: ExtensionAPI) {
     await runAutoReview(ctx, "auto");
   });
 
-  // ── Shortcuts ──────────────────────────────────────
+  // ── Shortcuts ──────────────────────────────────
 
   // Cancel handler — shared by shortcut + command
   function cancelReview(ctx: { ui: any; hasUI?: boolean }, source: string) {
@@ -875,6 +899,11 @@ export default function (pi: ExtensionAPI) {
     ignorePatterns = patterns;
     architectRules = rRules;
     settings = settingsResult.settings;
+
+    // Seed orchestrator enabled-state from persisted settings. This makes the
+    // toggle survive restarts (previously it was reset to `true` each session).
+    orchestrator.setEnabled(settings.enabled);
+    if (!settings.enabled) log(`review starts disabled (persisted enabled=false)`);
 
     if (autoReviewRules) log("Loaded auto-review rules from .hardno/auto-review.md");
     if (customRules) log("Loaded custom rules from .hardno/review-rules.md");

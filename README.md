@@ -71,6 +71,7 @@ Use `/scaffold-review-files` to generate config templates.
 
 ```json
 {
+  "enabled": true,
   "maxReviewLoops": 100,
   "model": "amazon-bedrock/us.meta.llama4-maverick-17b-instruct-v1:0",
   "thinkingLevel": "off",
@@ -84,20 +85,23 @@ Use `/scaffold-review-files` to generate config templates.
 }
 ```
 
-| Setting            | Type        | Default                                                        | Description                                                                                |
-| ------------------ | ----------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `maxReviewLoops`   | integer > 0 | `100`                                                          | Max review→fix→review cycles before giving up                                              |
-| `model`            | string      | `"amazon-bedrock/us.meta.llama4-maverick-17b-instruct-v1:0"`   | Reviewer model (`"provider/model-id"`)                                                     |
-| `thinkingLevel`    | string      | `"off"`                                                        | `off\|minimal\|low\|medium\|high\|xhigh`                                                   |
-| `architectEnabled` | boolean     | `true`                                                         | Enable architect review (triggers when >1 file reviewed from git)                          |
-| `reviewTimeoutMs`  | integer > 0 | `120000`                                                       | Max wall-clock per review in ms                                                            |
-| `toggleShortcut`   | string      | `"alt+r"`                                                      | Key id for toggling review on/off                                                          |
-| `judgeEnabled`     | boolean     | `false`                                                        | Opt-in LLM gate that suppresses redundant reviews on read-only turns (see [Judge](#judge)) |
-| `judgeModel`       | string      | `"amazon-bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0"` | Model used by the judge (`"provider/model-id"`)                                            |
-| `judgeTimeoutMs`   | integer > 0 | `10000`                                                        | Max wall-clock per judge classification call in ms                                         |
-| `cancelShortcut`   | string      | `""` (none)                                                    | Key id for cancelling review (opt-in, see below)                                           |
+| Setting            | Type        | Default                                                        | Description                                                                                                                                           |
+| ------------------ | ----------- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `enabled`          | boolean     | `true`                                                         | Master on/off for auto-review. Persisted; re-read each turn so external tools (e.g. roundhouse `/toggle-review`) take effect without session restart. |
+| `maxReviewLoops`   | integer > 0 | `100`                                                          | Max review→fix→review cycles before giving up                                                                                                         |
+| `model`            | string      | `"amazon-bedrock/us.meta.llama4-maverick-17b-instruct-v1:0"`   | Reviewer model (`"provider/model-id"`)                                                                                                                |
+| `thinkingLevel`    | string      | `"off"`                                                        | `off\|minimal\|low\|medium\|high\|xhigh`                                                                                                              |
+| `architectEnabled` | boolean     | `true`                                                         | Enable architect review (triggers when >1 file reviewed from git)                                                                                     |
+| `reviewTimeoutMs`  | integer > 0 | `120000`                                                       | Max wall-clock per review in ms                                                                                                                       |
+| `toggleShortcut`   | string      | `"alt+r"`                                                      | Key id for toggling review on/off                                                                                                                     |
+| `judgeEnabled`     | boolean     | `false`                                                        | Opt-in LLM gate that suppresses redundant reviews on read-only turns (see [Judge](#judge))                                                            |
+| `judgeModel`       | string      | `"amazon-bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0"` | Model used by the judge (`"provider/model-id"`)                                                                                                       |
+| `judgeTimeoutMs`   | integer > 0 | `10000`                                                        | Max wall-clock per judge classification call in ms                                                                                                    |
+| `cancelShortcut`   | string      | `""` (none)                                                    | Key id for cancelling review (opt-in, see below)                                                                                                      |
 
 > **Note:** `roundupEnabled` is accepted as a legacy alias for `architectEnabled`.
+
+> **`enabled` toggle persistence & routing:** The in-TUI toggle (Alt+R / `/review`) and external tools write to whichever file `loadSettings` would read — local `cwd/.hardno/settings.json` if present, else global `~/.pi/.hardno/settings.json`. This matches the read precedence so a toggle never silently no-ops. The extension re-reads just the `enabled` field at each `agent_end`, so flipping it externally (e.g. via roundhouse `/toggle-review`) takes effect on the NEXT agent turn — no session restart needed.
 
 ### `.hardno/review-rules.md`
 

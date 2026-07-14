@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.3.0 (2026-05-11)
+
+### Features
+
+- **Persistent + runtime-toggleable enabled state.** New `enabled: boolean` setting in `.hardno/settings.json` (default `true`). Persisted across sessions — previously the Alt+R / `/review` toggle was in-memory only and reset on restart. Now the state sticks.
+
+- **External runtime toggle.** The extension re-reads just the `enabled` field from disk at each `agent_end`, so external tools (e.g. `roundhouse`'s `/toggle-review`) can flip it by writing to `~/.pi/.hardno/settings.json` without restarting the session. New exports: `isEnabledFromDisk()`, `writeEnabledToDisk()`.
+
+- **Atomic writes.** Toggle persistence uses tmp+rename so a crash mid-write never leaves a partial settings file.
+
+### Notes
+
+- Default behavior unchanged: no `enabled` key → treated as `true`.
+- Local `.hardno/settings.json` (cwd) takes precedence over global (`~/.pi/.hardno/`). When local exists but has no `enabled` key, it does NOT fall through to global — the more-specific file "wins" on silence too.
+
 ## 1.2.0 (2026-05-10)
 
 ### Features
